@@ -35,6 +35,9 @@ h=$(hdr -c "$SANDBOX/j0" -d "passwd=secretpw&passwd_again=secretpw&from_url=" "$
 echo "$h" | grep -q '^Set-Cookie: ALTSID=[0-9a-f]\{64\};' && ok "choosing a password signs you in" || bad "first-time sign in: $h"
 check "password file written" "$(cat "$SANDBOX/etc/web-secret" 2>/dev/null)" secretpw
 check "first sign in starts the setup wizard" "$(cat "$SANDBOX/tmp/firstboot" 2>/dev/null)" host
+echo "$h" | grep -q '^Location: /cgi-bin/classic.cgi?p=/cgi-bin/host.cgi' && ok "the wizard opens inside the classic frames" || bad "wizard location: $h"
+hdr -b "$SANDBOX/j0" -H 'Sec-Fetch-Dest: document' "$H/cgi-bin/home.cgi" | grep -q '^Location: /cgi-bin/classic.cgi?p=/cgi-bin/host.cgi' && ok "a new page opened on its own continues the wizard in the classic frames" || bad "wizard redirect for top-level pages"
+hdr -b "$SANDBOX/j0" -H 'Sec-Fetch-Dest: frame' "$H/cgi-bin/home.cgi" | grep -q '^Location: /cgi-bin/host.cgi' && ok "inside the frames the classic redirect is used (no nested frames)" || bad "wizard redirect inside frames"
 rm -f "$SANDBOX/tmp/firstboot"   # the rest of the tests are about normal use
 
 echo "== sign in"
@@ -66,6 +69,9 @@ for target in 'http%3A%2F%2Fevil.com' '%2F%2Fevil.com' '%2Fcgi-bin%2Fx%0d%0aSet-
 	echo "$l" | grep -q '^Location: /cgi-bin/home.cgi$' && ok "unsafe from_url '$target' ignored" || bad "from_url '$target' -> $(echo "$l" | grep Location)"
 	echo "$l" | grep -qi '^Set-Cookie: e=1' && bad "header injection worked"
 done
+s=$(newsalt); echo 1000 > "$SANDBOX/tmp/sessions/salt.$s"
+h=$(hdr -d "salt=$s&pwhash=$(md5 "secretpw$s")" "$H/cgi-bin/login_proc.cgi")
+echo "$h" | grep -q 'Set-Cookie' && bad "an old challenge was accepted" || ok "a challenge older than 10 minutes is refused"
 s=$(newsalt)
 l=$(hdr -d "salt=$s&pwhash=$(md5 "secretpw$s")&from_url=%2Fcgi-bin%2Ffiles.cgi%3Fnojs%3D1" "$H/cgi-bin/login_proc.cgi")
 echo "$l" | grep -q '^Location: /cgi-bin/files.cgi?nojs=1$' && ok "returns to the page you asked for" || bad "return page: $l"
@@ -79,6 +85,11 @@ check "path-like cookie is refused" "$(status -b 'ALTSID=../../etc/passwd' "$H/c
 check "short cookie is refused" "$(status -b 'ALTSID=abc' "$H/cgi-bin/home.cgi")" 303
 check "background request without a session gets 401" "$(status -H 'X-Requested-With: XMLHttpRequest' "$H/cgi-bin/status.cgi?refresh=systems_st")" 401
 check "old frame page without a session redirects" "$(status "$H/cgi-bin/sys_utils.cgi")" 303
+hdr "$H/cgi-bin/sys_utils.cgi?x=1" | grep -q '^Location: /cgi-bin/login.cgi?/cgi-bin/classic.cgi?p=/cgi-bin/sys_utils.cgi%3Fx%3D1$' && ok "a classic page returns inside its frames after sign in" || bad "classic return target: $(hdr "$H/cgi-bin/sys_utils.cgi?x=1" | grep Location)"
+hdr "$H/cgi-bin/files.cgi?nojs=1" | grep -q '^Location: /cgi-bin/login.cgi?/cgi-bin/files.cgi?nojs=1$' && ok "a new page returns to itself after sign in" || bad "new page return target"
+s=$(newsalt)
+l=$(hdr -d "salt=$s&pwhash=$(md5 "secretpw$s")&from_url=%2Fcgi-bin%2Fclassic.cgi%3Fp%3D%2Fcgi-bin%2Fsys_utils.cgi%253Fx%253D1" "$H/cgi-bin/login_proc.cgi")
+echo "$l" | grep -q '^Location: /cgi-bin/classic.cgi?p=/cgi-bin/sys_utils.cgi%3Fx%3D1$' && ok "the classic return address survives the form round trip" || bad "classic round trip: $l"
 check "two devices can be signed in at once" "$(login "$SANDBOX/j2" secretpw; status -b "$SANDBOX/j1" "$H/cgi-bin/home.cgi")$(status -b "$SANDBOX/j2" "$H/cgi-bin/home.cgi")" 200200
 check "session directory is private" "$(ls -ld "$SANDBOX/tmp/sessions" | cut -c1-10)" drwx------
 check "session files are private" "$(ls -l "$SANDBOX/tmp/sessions" | grep -v salt | grep -v '^total' | cut -c1-10 | sort -u)" -rw-------

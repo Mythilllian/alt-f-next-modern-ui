@@ -11,6 +11,11 @@ echo "== sh -n"
 for f in "$CGI"/*.cgi "$CGI"/*.sh; do
 	if ! sh -n "$f" 2>/dev/null; then echo "syntax error: $f"; rc=1; fi
 done
+if [ -n "$BB" ]; then
+	for f in "$CGI"/*.cgi "$CGI"/*.sh; do
+		if ! "$BB" sh -n "$f" 2>/dev/null; then echo "BusyBox ash syntax error: $f"; rc=1; fi
+	done
+fi
 [ $rc -eq 0 ] && echo "all scripts parse"
 
 if [ -n "$SHELLCHECK" ]; then

@@ -190,7 +190,9 @@ footer.foot {
   gap: var(--sp-3) var(--sp-5);
   align-items: center;
 }
-.theme { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); }
+.theme { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); font-weight: 400; margin-bottom: 0; }
+.theme span { white-space: nowrap; }
+.theme select { width: auto; }
 
 /* ---- surfaces and grids ---- */
 .card {
@@ -248,10 +250,10 @@ a.tile p { margin: 0 0 var(--sp-3); color: var(--muted); }
 .banner.ok, .banner.warn, .banner.bad { border-color: transparent; }
 
 .meter {
-  position: relative;
-  height: 1.5rem;
+  height: .75rem;
   border-radius: 999px;
   background: var(--surface-2);
+  border: 1px solid var(--line);
   overflow: hidden;
   min-width: 6rem;
 }
@@ -263,21 +265,10 @@ a.tile p { margin: 0 0 var(--sp-3); color: var(--muted); }
 }
 .meter.warn > i { background: var(--warn); }
 .meter.bad > i { background: var(--bad); }
-.meter > span {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-0);
-  font-weight: 600;
-  /* the label always sits on --surface-2 or a solid fill, so use a text shadow for both */
-  color: var(--text);
-  text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface);
-}
+.mt { display: block; margin-top: var(--sp-1); font-size: var(--fs-0); color: var(--muted); }
 .bgl { font-size: var(--fs-0); color: var(--muted); margin-bottom: var(--sp-1); }
 
-dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); margin: 0; }
+dl.facts { margin-top: var(--sp-4); display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-1) var(--sp-4); margin: 0; }
 dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; }
 
@@ -382,9 +373,15 @@ ul.files ul.files { margin-left: var(--sp-5); border-left: 2px solid var(--line)
 .notice { color: var(--muted); }
 
 @media (max-width: 40rem) {
+  .row { flex-wrap: wrap; }
+  .head { flex: 1 1 100%; }
+  .row .meta { padding-left: 3rem; }
   .row .date { display: none; }
   ul.files ul.files { margin-left: var(--sp-3); }
 }
+
+ul.links { list-style: none; margin: 0; padding: 0; }
+ul.links a { display: flex; align-items: center; min-height: var(--tap); }
 
 /* ---- utility ---- */
 .muted { color: var(--muted); }

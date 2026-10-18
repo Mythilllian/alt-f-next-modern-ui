@@ -79,6 +79,7 @@ check "folders are typed d" "$(python3 -c "import json;d=json.load(open('$SANDBO
 list "$(enc "$M/Disk1/empty")" | grep -q '"entries":\[\]' && ok "empty folder lists no entries" || bad "empty folder"
 list "$(enc "$M/Disk1/big")" > "$SANDBOX/big.json"
 check "big folder is cut at 1000" "$(python3 -c "import json;d=json.load(open('$SANDBOX/big.json'));print(len(d['entries']),d['truncated'])")" "1000 True"
+check "a folder that does not exist is 404, not 400" "$(lcode "$(enc "$M/Disk1/no-such-folder")")" 404
 check "symlink inside /mnt is followed" "$(lcode "$(enc "$M/Disk1/inside-link")")" 200
 python3 - "$SANDBOX/l.json" <<'PY' && ok "links that leave /mnt are not listed, links inside are" || bad "symlink listing"
 import json, sys

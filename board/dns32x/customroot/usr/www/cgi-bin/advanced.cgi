@@ -36,7 +36,7 @@ EOT
 
 # one card per menu of the classic Alt-F pages; the menu files are the single source
 for menu in $(cat Main.men); do
-	echo "<section class=\"card\"><h3>$(esc "$menu")</h3><ul>"
+	echo "<section class=\"card\"><h3>$(esc "$menu")</h3><ul class=\"links\">"
 	cat $menu*.men | while IFS='|' read -r label url; do
 		case "$url" in
 			*onclick*|'#'|'') continue ;;

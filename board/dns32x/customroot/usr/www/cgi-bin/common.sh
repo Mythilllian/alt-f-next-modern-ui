@@ -643,7 +643,14 @@ check_cookie() {
 	fi
 
 	_to=/cgi-bin/login.cgi
-	if test "$REQUEST_METHOD" != POST -a -n "$REQUEST_URI"; then _to="$_to?$REQUEST_URI"; fi
+	if test "$REQUEST_METHOD" != POST -a -n "$REQUEST_URI"; then
+		case "${REQUEST_URI%%\?*}" in
+			/cgi-bin/home.cgi|/cgi-bin/shares.cgi|/cgi-bin/advanced.cgi|/cgi-bin/confirm.cgi|/cgi-bin/files.cgi|/cgi-bin/status.cgi|/cgi-bin/classic.cgi)
+				_to="$_to?$REQUEST_URI" ;;
+			*)	# a classic page: after signing in, bring it back inside its frames
+				_to="$_to?/cgi-bin/classic.cgi?p=$(qencode "$REQUEST_URI")" ;;
+		esac
+	fi
 	printf 'HTTP/1.1 303\r\nContent-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\nLocation: %s\r\n\r\n' "$_to"
 	exit 0
 }
@@ -904,7 +911,7 @@ ui_meter() {
 	_c=""
 	if test "$_p" -ge "${4:-90}"; then _c=" bad"
 	elif test "$_p" -ge "${3:-80}"; then _c=" warn"; fi
-	printf '<div class="meter%s" role="img" aria-label="%s"><i class="w%d"></i><span>%s</span></div>\n' \
+	printf '<div class="meter%s" role="img" aria-label="%s"><i class="w%d"></i></div><span class="mt">%s</span>\n' \
 		"$_c" "$(esc "$2")" "$_p" "$(esc "$2")"
 }
 
@@ -913,8 +920,18 @@ ui_meter() {
 # section "login" prints a bare page with no navigation (used before signing in).
 page_start() {
 	HTML_HEADER_DONE="yes"
-	firstboot
 	_sec="$2"
+	# The first-time wizard is made of classic pages, which need their frames. When a
+	# new page is opened on its own while the wizard is running, continue the wizard
+	# inside the classic frames. Elsewhere the classic rules apply (firstboot).
+	if test -f /tmp/firstboot -a "$_sec" != login -a "$HTTP_SEC_FETCH_DEST" = document; then
+		_fb=$(cat /tmp/firstboot)
+		_fb=${_fb%_?}
+		if test "$_fb" != "$(basename "${0%.cgi}")" -a -f "./$_fb.cgi"; then
+			gotopage "$(classic_url "$_fb.cgi")"
+		fi
+	fi
+	firstboot
 	if test -s "$CONF_MISC"; then . "$CONF_MISC"; fi
 
 	printf 'Content-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\n\r\n'
@@ -929,6 +946,7 @@ page_start() {
 		<link rel="icon" type="image/png" href="/dns-323.png">
 		<link rel="stylesheet" href="/alt-f.css">
 		<script>try{var t=localStorage.getItem('altf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+		$(if test "$_sec" = login; then echo '<script>if(window.top!==window.self){window.top.location.href=window.location.href}</script>'; fi)
 		</head><body>
 		<a class="skip" href="#main">Skip to content</a>
 	EOF
@@ -967,7 +985,7 @@ page_end() {
 		</main>
 		<footer class="foot">
 		<span>Alt-F $(esc "$_ver")</span>
-		<a href="/cgi-bin/classic.cgi">Classic Alt-F pages</a>
+		$(if test "$_sec" != login; then echo '<a href="/cgi-bin/classic.cgi">Classic Alt-F pages</a>'; fi)
 		<label class="theme" for="theme-select"><span>Appearance</span>
 		<select id="theme-select"><option value="auto">Automatic</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
 		</footer>

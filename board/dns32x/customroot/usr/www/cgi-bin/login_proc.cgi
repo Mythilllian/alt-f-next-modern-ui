@@ -71,7 +71,7 @@ if ! test -s "$SECR"; then
 
 	if test -z "$(loadsave_settings -ls)"; then
 		echo host > /tmp/firstboot
-		loc="/cgi-bin/host.cgi"
+		loc=$(classic_url host.cgi)
 	else
 		loc="/cgi-bin/home.cgi"
 	fi
@@ -80,7 +80,10 @@ else
 	# the browser answers with md5(password + salt). It is deleted on first use.
 	case "$salt" in ''|*[!0-9a-f]*) try_again ;; esac
 	if test "${#salt}" -ne 32 -o ! -f "$SESS_DIR/salt.$salt"; then try_again; fi
+	read -r _issued < "$SESS_DIR/salt.$salt"
 	rm -f "$SESS_DIR/salt.$salt"
+	# a challenge is good for 10 minutes
+	if test $(($(date +%s) - ${_issued:-0})) -gt 600; then try_again; fi
 
 	if test -z "$pwhash"; then
 		# no JavaScript: the password arrived as typed, so hash it here

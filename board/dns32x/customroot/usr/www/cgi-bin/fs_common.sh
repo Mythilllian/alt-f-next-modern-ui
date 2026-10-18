@@ -28,7 +28,10 @@ fs_resolve() {
 	FS_REAL=$(realpath "$_d" 2>/dev/null) || { FS_ERR=missing; return 1; }
 	case "$FS_REAL" in
 		*[[:cntrl:]]*) FS_ERR=bad; return 1 ;;
-		"$FS_ROOT"|"$FS_ROOT"/*) return 0 ;;
+		"$FS_ROOT"|"$FS_ROOT"/*)
+			# realpath does not insist that the last part exists
+			if test -e "$FS_REAL"; then return 0; fi
+			FS_ERR=missing; return 1 ;;
 	esac
 	FS_ERR=outside
 	return 1
