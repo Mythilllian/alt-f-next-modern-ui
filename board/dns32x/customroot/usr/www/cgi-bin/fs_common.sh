@@ -10,12 +10,12 @@ fs_param() { qparam "$1"; }
 # Folders and files that Alt-F itself keeps in the top folder of a disk. They are hidden
 # from the browser and cannot be opened, downloaded or uploaded into, so nobody can
 # change or delete them by accident from the web page.
-FS_PRIVATE="Alt-F ffp opt lost+found aquota.user aquota.group"
+FS_PRIVATE="Alt-F ffp opt lost+found aquota.user aquota.group alt-f.log alt-f.log-previous"
 
 # fs_private <name>: true for one of those names
 fs_private() {
 	case "$1" in
-		Alt-F|ffp|opt|lost+found|aquota.user|aquota.group) return 0 ;;
+		Alt-F|ffp|opt|lost+found|aquota.user|aquota.group|alt-f.log|alt-f.log-previous) return 0 ;;
 	esac
 	return 1
 }

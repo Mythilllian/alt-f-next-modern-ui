@@ -147,16 +147,16 @@ check "archive of a missing folder is 404" "$(gcode "$(enc "$M/Disk1/nope")")" 4
 check "archive of an escaping link is refused" "$(gcode "$(enc "$M/Disk1/escape")")" 403
 
 echo "== Alt-F's own folders are hidden and protected"
-for n in Alt-F ffp opt lost+found aquota.user aquota.group; do mkdir -p "$M/Disk1/$n/inner"; echo secret > "$M/Disk1/$n/inner/file.txt"; done
+for n in Alt-F ffp opt lost+found aquota.user aquota.group alt-f.log alt-f.log-previous; do mkdir -p "$M/Disk1/$n/inner"; echo secret > "$M/Disk1/$n/inner/file.txt"; done
 mkdir -p "$M/Disk1/Photos/opt" && echo ok > "$M/Disk1/Photos/opt/visible.txt"
 list "$(enc "$M/Disk1")" > "$SANDBOX/priv.json"
 python3 - "$SANDBOX/priv.json" <<'PY' && ok "none of Alt-F's names are listed at the top of a disk" || bad "private names listed"
 import json, sys
 names = {e["n"] for e in json.load(open(sys.argv[1], encoding="utf-8"))["entries"]}
-assert not names & {"Alt-F", "ffp", "opt", "lost+found", "aquota.user", "aquota.group"}, names
+assert not names & {"Alt-F", "ffp", "opt", "lost+found", "aquota.user", "aquota.group", "alt-f.log", "alt-f.log-previous"}, names
 assert {"Photos", "My Docs"} <= names, names
 PY
-for n in Alt-F ffp opt lost+found aquota.user; do
+for n in Alt-F ffp opt lost+found aquota.user alt-f.log; do
 	check "list of /$n is refused" "$(lcode "$(enc "$M/Disk1/$n")")" 403
 	check "list inside /$n is refused" "$(lcode "$(enc "$M/Disk1/$n/inner")")" 403
 	check "download from /$n is refused" "$(gcode "$(enc "$M/Disk1/$n/inner/file.txt")")" 403
@@ -166,7 +166,7 @@ check "and its files can be downloaded" "$(gcode "$(enc "$M/Disk1/Photos/opt/vis
 curl -s -b "$JAR" -o "$SANDBOX/priv.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1")"
 tar -tf "$SANDBOX/priv.tar" > "$SANDBOX/priv.lst" 2>/dev/null
 grep -q 'Disk1/Photos/opt/visible.txt' "$SANDBOX/priv.lst" && ok "downloading a whole disk keeps normal folders" || bad "disk archive missing normal files"
-if grep -qE 'Disk1/(Alt-F|ffp|opt|lost\+found|aquota)' "$SANDBOX/priv.lst"; then bad "disk archive contains Alt-F's folders"; else ok "downloading a whole disk leaves Alt-F's folders out"; fi
+if grep -qE 'Disk1/(Alt-F|ffp|opt|lost\+found|aquota|alt-f\.log)' "$SANDBOX/priv.lst"; then bad "disk archive contains Alt-F's folders"; else ok "downloading a whole disk leaves Alt-F's folders out"; fi
 curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")"  | grep -q '/Disk1/\(Alt-F\|ffp\|opt\|lost\|aquota\)' && bad "simple page lists private names" || ok "the simple page hides them too"
 
 echo "== up one folder"
