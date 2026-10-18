@@ -60,7 +60,7 @@ else
 	cat<<-EOT
 		<noscript><div class="banner warn">Folders open one page at a time because JavaScript is off.
 		<a href="/cgi-bin/files.cgi?nojs=1">Open the simple file list</a>.</div></noscript>
-		<div id="fb" data-root="$FS_ROOT" data-list="/cgi-bin/files_list.cgi" data-get="/cgi-bin/files_get.cgi" data-put="/cgi-bin/files_put.cgi">
+		<div id="fb" data-root="$FS_ROOT" data-list="/cgi-bin/files_list.cgi" data-get="/cgi-bin/files_get.cgi" data-put="/cgi-bin/files_put.cgi" data-size="/cgi-bin/files_size.cgi">
 		<p class="empty" id="fb-loading" role="status">Loading your files&hellip;</p></div>
 		<script src="/files.js"></script>
 	EOT

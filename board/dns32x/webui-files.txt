@@ -9,6 +9,7 @@ usr/www/cgi-bin/files.cgi
 usr/www/cgi-bin/files_get.cgi
 usr/www/cgi-bin/files_list.cgi
 usr/www/cgi-bin/files_put.cgi
+usr/www/cgi-bin/files_size.cgi
 usr/www/cgi-bin/fs_common.sh
 usr/www/cgi-bin/home.cgi
 usr/www/cgi-bin/login.cgi

@@ -8,6 +8,8 @@
   var LIST = box.getAttribute('data-list');
   var GET = box.getAttribute('data-get');
   var PUT = box.getAttribute('data-put');
+  var SIZE = box.getAttribute('data-size');
+  var sizes = {};
   var cache = {};
   var current = ROOT;
   var sortKey = 'name';
@@ -71,6 +73,33 @@
       return a.n.localeCompare(b.n, undefined, { numeric: true, sensitivity: 'base' });
     });
     return list;
+  }
+
+  /* how much space a folder uses; counted on request only, since it reads the whole folder.
+     btn is pressed; the answer goes to out (the button itself in a row) */
+  function measure(path, btn, out, brief) {
+    if (sizes[path] !== undefined) { out.textContent = fmtSize(sizes[path]); return; }
+    btn.disabled = true;
+    out.textContent = 'Counting…';
+    function fail(text, code) {
+      btn.disabled = false;
+      btn.textContent = 'Try again';
+      out.textContent = brief ? (code === 'toolong' ? 'Too big to count' : code === 'busy' ? 'Busy, try again' : 'Try again') : text;
+    }
+    fetch(SIZE + '?p=' + enc(path), { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.reload(); return null; }
+        return r.json();
+      })
+      .then(function (j) {
+        if (!j) return;
+        if (j.bytes === undefined) { fail(j.error || 'Something went wrong.', j.code); return; }
+        sizes[path] = +j.bytes;
+        btn.disabled = false;
+        out.textContent = fmtSize(sizes[path]);
+        if (out !== btn) btn.textContent = 'Count again';
+      })
+      .catch(function () { fail("Couldn't reach the NAS. Check your network connection and try again.", ''); });
   }
 
   function message(text, retry) {
@@ -138,6 +167,11 @@
       dl.href = GET + '?p=' + enc(full);
       dl.setAttribute('aria-label', 'Download the folder ' + e.n);
       r.appendChild(dl);
+      var sz = el('button', 'meta act', sizes[full] !== undefined ? fmtSize(sizes[full]) : 'Size');
+      sz.type = 'button';
+      sz.setAttribute('aria-label', 'Count how much space the folder ' + e.n + ' uses');
+      sz.addEventListener('click', function () { measure(full, sz, sz, true); });
+      r.insertBefore(sz, dl);
     } else {
       name = el('a', 'name');
       name.href = GET + '?p=' + enc(full);
@@ -274,6 +308,13 @@
       var all = el('a', 'btn mb', 'Download this folder');
       all.href = GET + '?p=' + enc(path);
       box.appendChild(all);
+      var cnt = el('button', 'btn mb', 'Folder size');
+      cnt.type = 'button';
+      var res = el('span', 'meta');
+      res.setAttribute('aria-live', 'polite');
+      cnt.addEventListener('click', function () { measure(path, cnt, res, false); });
+      box.appendChild(cnt);
+      box.appendChild(res);
     }
     var card = el('div', 'card');
     card.appendChild(tools());

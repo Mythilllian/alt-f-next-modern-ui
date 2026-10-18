@@ -17,6 +17,7 @@ sh "$HERE/harness.sh" start >/dev/null || exit 1
 trap 'sh "$HERE/harness.sh" stop' EXIT
 
 M=$SANDBOX/mnt
+LOCKDIR=/tmp/fs-size.lock
 echo -n secretpw > "$SANDBOX/etc/web-secret"
 
 ok()   { PASS=$((PASS + 1)); echo "ok   $1"; }
@@ -180,6 +181,36 @@ check "similar name that is not a zip is still there" "$(gcode "$(enc "$M/Disk1/
 check "similar name readable by everyone is still there" "$(gcode "$(enc "$M/Disk1/ziAbC125")")" 200
 if grep -qE '/(ziAbC123|ziAbC126)$' "$SANDBOX/priv.lst"; then bad "disk archive contains zip leftovers"; else ok "downloading a whole disk leaves zip leftovers out"; fi
 grep -q 'ziAbC124' "$SANDBOX/priv.lst" && ok "and keeps look-alike files" || bad "look-alike file missing from archive"
+
+echo "== folder sizes"
+size() { curl -s -b "$JAR" "$H/cgi-bin/files_size.cgi?p=$1"; }
+scode() { code "$H/cgi-bin/files_size.cgi?p=$1"; }
+mkdir -p "$M/Disk1/sz/inner"; dd if=/dev/zero of="$M/Disk1/sz/inner/a.bin" bs=1024 count=2048 2>/dev/null; dd if=/dev/zero of="$M/Disk1/sz/b.bin" bs=1024 count=1024 2>/dev/null
+check "size of a folder is 3 MB of blocks" "$(size "$(enc "$M/Disk1/sz")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')" 3145728
+check "size of an empty folder answers" "$(scode "$(enc "$M/Disk1/empty")")" 200
+check "size of the all-disks root is refused" "$(scode "$(enc "$M")")" 400
+check "size of a file is refused" "$(scode "$(enc "$M/Disk1/Photos/beach.jpg")")" 400
+check "size of a missing folder is 404" "$(scode "$(enc "$M/Disk1/nope")")" 404
+check "size of an escaping link is refused" "$(scode "$(enc "$M/Disk1/escape")")" 403
+check "size of ../ is refused" "$(scode "$(enc "$M/Disk1/../../etc")")" 403
+check "size of /Alt-F is refused" "$(scode "$(enc "$M/Disk1/Alt-F")")" 403
+curl -s -o /dev/null -w '%{http_code}' "$H/cgi-bin/files_size.cgi?p=$(enc "$M/Disk1/sz")" | grep -q 401 && ok "size needs a session" || bad "size without a session"
+dd if=/dev/zero of="$M/Disk1/Alt-F/big.bin" bs=1024 count=4096 2>/dev/null
+a=$(size "$(enc "$M/Disk1")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+mv "$M/Disk1/Alt-F/big.bin" "$SANDBOX/big.bin"
+b=$(size "$(enc "$M/Disk1")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+check "a disk's size leaves out Alt-F's folder" "$a" "$b"
+mkdir "$LOCKDIR" 2>/dev/null; sleep 30 & lp=$!; echo $lp > "$LOCKDIR/pid"
+check "a second count while one runs is told to wait" "$(scode "$(enc "$M/Disk1/sz")")" 503
+kill $lp; wait $lp 2>/dev/null
+check "a lock left by a dead count is cleaned up" "$(scode "$(enc "$M/Disk1/sz")")" 200
+[ ! -d "$LOCKDIR" ] && ok "the lock is released afterwards" || bad "lock left behind"
+# a copy whose count never finishes, with a 1 second limit
+sed 's/^FS_SIZE_LIMIT=60/FS_SIZE_LIMIT=1/; s/nice du -skx "\$@"/sleep 20/' "$SANDBOX/www/cgi-bin/files_size.cgi" > "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
+chmod +x "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
+check "a count that takes too long is stopped with 504" "$(code "$H/cgi-bin/files_size_slow.cgi?p=$(enc "$M/Disk1/sz")")" 504
+[ ! -d "$LOCKDIR" ] && ok "and the lock is released" || bad "lock left after timeout"
+rm -f "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
 
 echo "== up one folder"
 up() { curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$1")" | grep -o 'href="[^"]*" aria-label="Up one folder"' | head -1; }

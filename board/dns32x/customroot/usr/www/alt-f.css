@@ -364,6 +364,7 @@ ul.files li:last-child { border-bottom: 0; }
 }
 .row .name { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text); text-decoration: none; background: none; border: 0; font: inherit; text-align: left; cursor: pointer; min-height: var(--tap); padding: 0; }
 .row .name:hover { text-decoration: underline; }
+.row button.meta { background: none; border: 0; font: inherit; font-size: var(--fs-0); cursor: pointer; text-decoration: underline; min-height: var(--tap); padding: 0 var(--sp-1); }
 .row .meta { color: var(--muted); font-size: var(--fs-0); white-space: nowrap; }
 .head { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; flex: 1 1 auto; }
 .tog { flex: none; width: var(--tap); height: var(--tap); border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; cursor: pointer; border-radius: var(--radius-sm); }
@@ -376,7 +377,7 @@ ul.files ul.files { margin-left: var(--sp-5); border-left: 2px solid var(--line)
 @media (max-width: 40rem) {
   .row { flex-wrap: wrap; }
   .head { flex: 1 1 100%; }
-  .row .meta { padding-left: 3rem; }
+  .row .meta, .row button.meta { padding-left: 3rem; }
   .row .date { display: none; }
   ul.files ul.files { margin-left: var(--sp-3); }
 }
