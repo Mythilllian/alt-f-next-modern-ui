@@ -33,10 +33,10 @@ EOT
 
 # Disk health and space
 echo '<a class="card tile" href="/cgi-bin/status.cgi"><h2>Disk health and space</h2>'
-if test "$ST_TOTAL" -eq 0; then
+if test -z "$ST_TOTAL_H"; then
 	echo '<p>No disks found. Plug in a drive and refresh.</p>'
 else
-	ui_meter "$ST_PCT" "$(hsize $((ST_USED * 1024))) used of $(hsize $((ST_TOTAL * 1024)))"
+	ui_meter "$ST_PCT" "$ST_USED_H used of $ST_TOTAL_H"
 	if test "$ST_MAXPCT" -ge 95; then
 		echo '<p>A disk is almost full.</p>'
 	elif test "$ST_MAXPCT" -ge 85; then

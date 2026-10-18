@@ -48,7 +48,7 @@ setup() {
 		printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/stubs/$c"; chmod +x "$SANDBOX/stubs/$c"
 	done
 	# df: pretend the disk is almost full while $SANDBOX/df-small exists (upload tests)
-	printf '#!/bin/sh\nif [ -f "%s/df-small" ]; then echo "Filesystem 1K-blocks Used Available Use%% Mounted on"; echo "/dev/fake 1000 990 10 99%% /mnt"; else exec "%s" df "$@"; fi\n' "$SANDBOX" "$BB" > "$SANDBOX/stubs/df"
+	printf '#!/bin/sh\nif [ -f "%s/df-small" ]; then echo "Filesystem 1K-blocks Used Available Use%% Mounted on"; echo "/dev/fake 1000 990 10 99%% /mnt"; elif [ -f "%s/df-huge" ]; then echo "Filesystem 1K-blocks Used Available Use%% Mounted on"; echo "/dev/sda2 3900000000 287600 3899712400 1%% /mnt"; echo "/dev/sdb2 3900000000 1000 3899999000 1%% /mnt2"; else exec "%s" df "$@"; fi\n' "$SANDBOX" "$SANDBOX" "$BB" > "$SANDBOX/stubs/df"
 	chmod +x "$SANDBOX/stubs/df"
 	# loadsave_settings: "-ls" lists saved settings (none here), "-st" says nothing changed
 	printf '#!/bin/sh\ncase "$1" in -ls) exit 0 ;; *) exit 1 ;; esac\n' > "$SANDBOX/stubs/loadsave_settings"

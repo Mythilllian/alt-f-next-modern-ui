@@ -1007,20 +1007,28 @@ page_error() {
 	exit 0
 }
 
-# storage_info: sets ST_TOTAL and ST_USED (KB), ST_PCT (overall) and ST_MAXPCT (fullest disk)
+# storage_info: sets ST_PCT (overall use) and ST_MAXPCT (fullest disk), plus ST_USED_H and
+# ST_TOTAL_H as ready-to-print sizes ("1.2 TB"). ST_TOTAL_H stays empty without disks.
+# Sizes are formatted in awk: this BusyBox does shell arithmetic in 32 bits, which
+# overflows on multi-terabyte disks.
 storage_info() {
-	eval $(df -k 2>/dev/null | awk '$1 ~ /^\/dev\/(sd|md|dm-)/ && !seen[$1]++ {
-			t += $2; u += $3; p = $5 + 0; if (p > m) m = p }
-		END { printf "ST_TOTAL=%.0f; ST_USED=%.0f; ST_MAXPCT=%d; ST_PCT=%d",
-			t, u, m, (t ? u * 100 / t : 0) }')
-	ST_TOTAL=${ST_TOTAL:-0}; ST_USED=${ST_USED:-0}; ST_PCT=${ST_PCT:-0}; ST_MAXPCT=${ST_MAXPCT:-0}
+	eval $(df -k 2>/dev/null | awk '
+		function hs(kb,   u, i, b) {
+			split("KB MB GB TB PB", u, " "); i = 1; b = kb
+			while (b >= 1024 && i < 5) { b /= 1024; i++ }
+			return sprintf("%.1f %s", b, u[i])
+		}
+		$1 ~ /^\/dev\/(sd|md|dm-)/ && !seen[$1]++ { t += $2; u += $3; p = $5 + 0; if (p > m) m = p }
+		END { printf "ST_USED_H=\"%s\"; ST_TOTAL_H=\"%s\"; ST_MAXPCT=%d; ST_PCT=%d",
+			(t ? hs(u) : ""), (t ? hs(t) : ""), m, (t ? u * 100 / t : 0) }')
+	ST_PCT=${ST_PCT:-0}; ST_MAXPCT=${ST_MAXPCT:-0}
 }
 
 # health_check: cheap checks from /proc and /sys only (does not wake sleeping disks).
 # Sets HEALTH_LEVEL (ok, warn or bad) and HEALTH_MSGS (one plain sentence per line).
 health_check() {
 	HEALTH_LEVEL=ok; HEALTH_MSGS=""
-	ST_TOTAL=0; ST_USED=0; ST_PCT=0; ST_MAXPCT=0
+	ST_USED_H=""; ST_TOTAL_H=""; ST_PCT=0; ST_MAXPCT=0
 	_hc_add() {
 		HEALTH_MSGS="${HEALTH_MSGS}${HEALTH_MSGS:+
 }$2"

@@ -104,6 +104,14 @@ curl -s -b "$JAR" -H 'X-Requested-With: x' "$H/cgi-bin/files_put.cgi?check=1&p=$
 rm -f "$SANDBOX/df-small"
 [ ! -e "$U/full.txt" ] && ok "no file left after the refusal" || bad "file left after refusal"
 
+echo "== multi-terabyte disks (32-bit shell arithmetic)"
+: > "$SANDBOX/df-huge"
+r=$(put "$U" "huge-disk.txt" "$SANDBOX/a.txt"); check "upload works when the disk has 3.9 TB free" "$(code "$r")" 200
+curl -s -b "$JAR" -H 'X-Requested-With: x' "$H/cgi-bin/files_put.cgi?check=1&p=$(enc "$U")" | grep -q '"free":2000000000}' && ok "reported free space is capped, never negative" || bad "free space cap"
+out=$(cd "$SANDBOX/www/cgi-bin" && PATH="$SANDBOX/stubs:$SANDBOX/bin:/usr/bin:/bin" "$SANDBOX/bin/sh" -c '. ./common.sh; storage_info; echo "$ST_USED_H|$ST_TOTAL_H|$ST_PCT|$ST_MAXPCT"')
+check "storage totals for two 3.9 TB disks" "$out" "281.8 MB|7.3 TB|0|1"
+rm -f "$SANDBOX/df-huge"
+
 echo "== big, binary and interrupted"
 dd if=/dev/urandom of="$SANDBOX/big.bin" bs=1M count=200 2>/dev/null
 printf '\r\n--abc\r\n\000\377\r\n' >> "$SANDBOX/big.bin"

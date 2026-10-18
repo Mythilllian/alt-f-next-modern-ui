@@ -56,7 +56,8 @@ len=${CONTENT_LENGTH:-0}
 case "$len" in ''|*[!0-9]*) fail "400 Bad Request" bad "That upload could not be read." ;; esac
 
 free=$(fs_free_kb "$FS_REAL")
-if test $((${free:-0} * 1024)) -lt $((len + 1048576)); then
+# compared in KB (with 1 MB spare) to keep the numbers small
+if test "${free:-0}" -lt $((len / 1024 + 1025)); then
 	fail "413 Payload Too Large" space "There isn't enough room on the disk for this file."
 fi
 

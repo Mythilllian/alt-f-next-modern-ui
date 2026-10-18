@@ -193,9 +193,10 @@ fs_name_ok() {
 	return $_ok
 }
 
-# fs_free_kb <dir>: free space in KB
+# fs_free_kb <dir>: free space in KB, capped at 2,000,000,000 (about 2 TB) so that it
+# stays inside this BusyBox's 32-bit shell arithmetic. A request is at most 2 GB anyway.
 fs_free_kb() {
-	df -k "$1" 2>/dev/null | awk 'NR == 2 { printf "%.0f", $4 }'
+	df -k "$1" 2>/dev/null | awk 'NR == 2 { f = $4; if (f > 2000000000) f = 2000000000; printf "%.0f", f }'
 }
 
 # fs_owner <dir>: sets FS_UID and FS_GID to the owner of a folder, so uploaded files
