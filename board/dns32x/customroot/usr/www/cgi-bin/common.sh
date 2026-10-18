@@ -1095,7 +1095,7 @@ classic_url() {
 
 # qencode <text>: escape the few characters that would break a query-string value
 qencode() {
-	printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/?/%3F/g' -e 's/&/%26/g' -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/ /%20/g'
+	printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/?/%3F/g' -e 's/&/%26/g' -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/#/%23/g' -e 's/ /%20/g'
 }
 
 # shares_tsv: "name<TAB>path" for each Samba shared folder

@@ -7,6 +7,7 @@
   var ROOT = box.getAttribute('data-root');
   var LIST = box.getAttribute('data-list');
   var GET = box.getAttribute('data-get');
+  var PUT = box.getAttribute('data-put');
   var cache = {};
   var current = ROOT;
   var sortKey = 'name';
@@ -250,6 +251,7 @@
     current = path;
     box.textContent = '';
     box.appendChild(crumbs(path));
+    if (path !== ROOT || up.busy) box.appendChild(uploadPanel(path));
     if (path !== ROOT) {
       var all = el('a', 'btn mb', 'Download this folder');
       all.href = GET + '?p=' + enc(path);
@@ -286,6 +288,205 @@
     if (p !== ROOT && p.indexOf(ROOT + '/') !== 0) p = ROOT;
     render(p);
   }
+
+  /* ---- uploads: files and whole folders, one request per file, with progress ---- */
+  var MAXFILE = 2147000000; /* the NAS web server accepts at most 2 GB per request */
+  var up = { busy: false, cancel: false, xhr: null, dir: ROOT, panel: null, text: null, bar: null, list: null, drop: null, btns: [] };
+
+  function say(msg) { up.text.textContent = msg; }
+
+  function walk(entry, prefix) {
+    return new Promise(function (resolve) {
+      if (entry.isFile) {
+        entry.file(function (f) { resolve([{ file: f, rel: prefix + entry.name }]); }, function () { resolve([]); });
+      } else if (entry.isDirectory) {
+        var reader = entry.createReader();
+        var all = [];
+        (function read() {
+          reader.readEntries(function (ents) {
+            if (!ents.length) {
+              Promise.all(all.map(function (en) { return walk(en, prefix + entry.name + '/'); })).then(function (parts) {
+                resolve([].concat.apply([], parts));
+              });
+              return;
+            }
+            all = all.concat(Array.prototype.slice.call(ents));
+            read();
+          }, function () { resolve([]); });
+        }());
+      } else {
+        resolve([]);
+      }
+    });
+  }
+
+  function fromDrop(dt) {
+    var items = dt.items;
+    if (items && items.length && items[0].webkitGetAsEntry) {
+      var entries = [];
+      for (var i = 0; i < items.length; i++) {
+        var en = items[i].webkitGetAsEntry();
+        if (en) entries.push(en);
+      }
+      return Promise.all(entries.map(function (en) { return walk(en, ''); })).then(function (parts) {
+        return [].concat.apply([], parts);
+      });
+    }
+    return Promise.resolve(Array.prototype.map.call(dt.files, function (f) { return { file: f, rel: f.name }; }));
+  }
+
+  function setBusy(b) {
+    up.busy = b;
+    up.btns.forEach(function (x) { x.disabled = b; });
+    up.cancelBtn.hidden = !b;
+    up.bar.hidden = !b;
+  }
+
+  function finish(done, failed, dir) {
+    setBusy(false);
+    up.xhr = null;
+    Object.keys(cache).forEach(function (k) { if (k === dir || k.indexOf(dir + '/') === 0) delete cache[k]; });
+    var msg = done + (done === 1 ? ' file' : ' files') + ' uploaded.';
+    if (up.cancel) msg = 'Upload stopped. ' + msg;
+    say(msg);
+    if (failed.length) {
+      say(msg + ' ' + failed.length + ' could not be uploaded:');
+      failed.forEach(function (f) { up.list.appendChild(el('li', '', f)); });
+    }
+    if (current === dir) render(dir);
+  }
+
+  function sendAll(queue, dir) {
+    var i = 0, sent = 0, done = 0, failed = [];
+    var total = queue.reduce(function (n, q) { return n + q.file.size; }, 0) || 1;
+    up.cancel = false;
+    setBusy(true);
+    up.list.textContent = '';
+
+    function step() {
+      if (up.cancel || i >= queue.length) { finish(done, failed, dir); return; }
+      var q = queue[i];
+      var x = new XMLHttpRequest();
+      up.xhr = x;
+      say('Uploading ' + (i + 1) + ' of ' + queue.length + ': ' + q.rel);
+      x.open('POST', PUT + '?p=' + enc(dir) + '&n=' + enc(q.rel));
+      x.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+      x.upload.onprogress = function (e) {
+        up.bar.value = Math.round(100 * (sent + e.loaded) / total);
+      };
+      x.onload = function () {
+        sent += q.file.size;
+        if (x.status === 401) { window.location.reload(); return; }
+        if (x.status === 200) { done++; } else {
+          var m = 'Could not upload.';
+          try { m = JSON.parse(x.responseText).error || m; } catch (e) { /* keep the generic text */ }
+          failed.push(q.rel + ': ' + m);
+        }
+        i++;
+        step();
+      };
+      x.onerror = function () {
+        failed.push(q.rel + ": the connection to the NAS was lost.");
+        i = queue.length;
+        step();
+      };
+      x.send(q.file);
+    }
+    step();
+  }
+
+  function startUpload(items) {
+    if (up.busy || !items.length) return;
+    var dir = current;
+    if (dir === ROOT) { say('Open a disk first, then upload into one of its folders.'); return; }
+    up.list.textContent = '';
+    var big = items.filter(function (q) { return q.file.size > MAXFILE; });
+    if (big.length) {
+      say(big[0].rel + ' is bigger than 2 GB, which the web page can not carry. Copy files that big over the network share instead.');
+      return;
+    }
+    var total = items.reduce(function (n, q) { return n + q.file.size; }, 0);
+    say('Checking free space…');
+    fetch(PUT + '?check=1&p=' + enc(dir), { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) {
+        if (r.status === 401) { window.location.reload(); return null; }
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      })
+      .then(function (res) {
+        if (!res) return;
+        if (!res.ok) { say(res.j.error || 'Something went wrong.'); return; }
+        if (total > res.j.free * 1024) {
+          say('There is not enough room on the disk: ' + fmtSize(total) + ' to upload, ' + fmtSize(res.j.free * 1024) + ' free.');
+          return;
+        }
+        sendAll(items, dir);
+      })
+      .catch(function () { say("Couldn't reach the NAS. Check your network connection and try again."); });
+  }
+
+  function chooser(label, dirMode) {
+    var inp = el('input');
+    inp.type = 'file';
+    inp.hidden = true;
+    inp.multiple = true;
+    if (dirMode) inp.setAttribute('webkitdirectory', '');
+    inp.addEventListener('change', function () {
+      var items = Array.prototype.map.call(inp.files, function (f) {
+        return { file: f, rel: dirMode && f.webkitRelativePath ? f.webkitRelativePath : f.name };
+      });
+      inp.value = '';
+      startUpload(items);
+    });
+    var b = el('button', 'btn', label);
+    b.type = 'button';
+    b.addEventListener('click', function () { inp.click(); });
+    up.btns.push(b);
+    return [b, inp];
+  }
+
+  function uploadPanel() {
+    if (up.panel) return up.panel;
+    var card = el('div', 'card mb');
+    up.drop = el('div', 'drop');
+    up.drop.appendChild(el('p', '', 'Drag files or folders here to upload them to this folder, or choose them.'));
+    var acts = el('div', 'actions');
+    chooser('Upload files', false).forEach(function (n) { acts.appendChild(n); });
+    if ('webkitdirectory' in document.createElement('input')) {
+      chooser('Upload a folder', true).forEach(function (n) { acts.appendChild(n); });
+    }
+    up.drop.appendChild(acts);
+    card.appendChild(up.drop);
+    up.text = el('p', 'notice');
+    up.text.setAttribute('role', 'status');
+    up.bar = el('progress');
+    up.bar.max = 100;
+    up.bar.value = 0;
+    up.bar.hidden = true;
+    up.cancelBtn = el('button', 'btn', 'Stop uploading');
+    up.cancelBtn.type = 'button';
+    up.cancelBtn.hidden = true;
+    up.cancelBtn.addEventListener('click', function () { up.cancel = true; if (up.xhr) up.xhr.abort(); });
+    up.list = el('ul', 'uplist');
+    [up.text, up.bar, up.cancelBtn, up.list].forEach(function (n) { card.appendChild(n); });
+    up.panel = card;
+    return card;
+  }
+
+  box.addEventListener('dragover', function (e) {
+    if (current === ROOT || up.busy) return;
+    e.preventDefault();
+    if (up.drop) up.drop.classList.add('over');
+  });
+  box.addEventListener('dragleave', function () { if (up.drop) up.drop.classList.remove('over'); });
+  box.addEventListener('drop', function (e) {
+    if (current === ROOT || up.busy) return;
+    e.preventDefault();
+    if (up.drop) up.drop.classList.remove('over');
+    fromDrop(e.dataTransfer).then(startUpload);
+  });
+  window.addEventListener('beforeunload', function (e) {
+    if (up.busy) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   window.addEventListener('hashchange', fromHash);
   fromHash();

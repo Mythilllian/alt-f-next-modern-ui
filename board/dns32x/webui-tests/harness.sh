@@ -21,7 +21,7 @@ setup() {
 	cp -r "$WWW_SRC" "$SANDBOX/www"
 	# applets the scripts expect
 	for a in sh ash httpd hexdump md5sum dd cut sed awk tr date realpath readlink ls head tail \
-			cat sort expr touch rm mkdir chmod logger sleep grep wc basename dirname find hostname df pidof mktemp tr; do
+			cat sort expr touch rm mkdir chmod logger sleep grep wc basename dirname find hostname df pidof mktemp tr mv cp chown; do
 		ln -sf "$BB" "$SANDBOX/bin/$a"
 	done
 	# run every script with the sandbox shell and redirect the absolute paths the
@@ -47,6 +47,9 @@ setup() {
 	for c in smartctl plabel tune2fs blkid smbstatus showmount smbpasswd chpasswd; do
 		printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/stubs/$c"; chmod +x "$SANDBOX/stubs/$c"
 	done
+	# df: pretend the disk is almost full while $SANDBOX/df-small exists (upload tests)
+	printf '#!/bin/sh\nif [ -f "%s/df-small" ]; then echo "Filesystem 1K-blocks Used Available Use%% Mounted on"; echo "/dev/fake 1000 990 10 99%% /mnt"; else exec "%s" df "$@"; fi\n' "$SANDBOX" "$BB" > "$SANDBOX/stubs/df"
+	chmod +x "$SANDBOX/stubs/df"
 	# loadsave_settings: "-ls" lists saved settings (none here), "-st" says nothing changed
 	printf '#!/bin/sh\ncase "$1" in -ls) exit 0 ;; *) exit 1 ;; esac\n' > "$SANDBOX/stubs/loadsave_settings"
 	chmod +x "$SANDBOX/stubs/loadsave_settings"

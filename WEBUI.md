@@ -9,16 +9,16 @@ This branch (`webui`) adds a simpler, friendlier web interface next to the class
 | Look | One stylesheet (`alt-f.css`), light and dark themes that follow the system with an Automatic / Light / Dark switch in the footer, layouts from a 320 px phone to a 4K screen, 44 px tap targets, visible focus rings, reduced-motion support. |
 | Home | Four cards: Files, Disk health and space, Shared folders, Is everything OK? Written in plain language. |
 | Health | The old status page, rebuilt on the shared shell, with a plain-language summary on top. All the technical tables are still there. |
-| Files | A browser for `/mnt`: one folder level at a time, a tree on wide screens and a plain list on phones, breadcrumbs, sort by name/size/date, a filter box, human-readable sizes and dates, and download links. |
+| Files | A browser for `/mnt` with downloads and uploads of files and whole folders: one folder level at a time, a tree on wide screens and a plain list on phones, breadcrumbs, sort by name/size/date, a filter box, human-readable sizes and dates, and download links. |
 | Sign-in | One login per device. Sessions slide with activity (8 hours idle, 7 days at most by default), "Keep me signed in on this device", and a Sign out button. |
 | Advanced | Every classic settings page, built from the `.men` menu files, plus SSH status (read-only) and Restart / Switch off. Pages that can erase data or break the network ask for confirmation first. |
 
-Static payload: `alt-f.css` 14.3 KB + `alt-f.js` 3.3 KB + `files.js` 9.1 KB = 26.7 KB uncompressed (8.3 KB gzipped). No fonts, no CDNs, no build step.
+Static payload: `alt-f.css` 15.7 KB + `alt-f.js` 3.3 KB + `files.js` 15.7 KB = 34.7 KB uncompressed. No fonts, no CDNs, no build step.
 
 ### Files
 
 New under `board/dns32x/customroot/usr/www/`:
-`alt-f.css`, `alt-f.js`, `files.js`, and in `cgi-bin/`: `home.cgi`, `shares.cgi`, `advanced.cgi`, `confirm.cgi`, `classic.cgi`, `files.cgi`, `files_list.cgi`, `files_get.cgi`, `fs_common.sh`.
+`alt-f.css`, `alt-f.js`, `files.js`, and in `cgi-bin/`: `home.cgi`, `shares.cgi`, `advanced.cgi`, `confirm.cgi`, `classic.cgi`, `files.cgi`, `files_list.cgi`, `files_get.cgi`, `files_put.cgi`, `fs_common.sh`.
 
 New under `customroot/etc/`: `web-session.conf` (and a line for it in `/etc/settings`, so "Save settings" keeps it).
 
@@ -77,7 +77,7 @@ tar cf - \
   usr/www/cgi-bin/status.cgi usr/www/cgi-bin/sys_utils_proc.cgi \
   usr/www/cgi-bin/home.cgi usr/www/cgi-bin/shares.cgi usr/www/cgi-bin/advanced.cgi \
   usr/www/cgi-bin/confirm.cgi usr/www/cgi-bin/classic.cgi \
-  usr/www/cgi-bin/files.cgi usr/www/cgi-bin/files_list.cgi usr/www/cgi-bin/files_get.cgi \
+  usr/www/cgi-bin/files.cgi usr/www/cgi-bin/files_list.cgi usr/www/cgi-bin/files_get.cgi usr/www/cgi-bin/files_put.cgi \
   etc/web-session.conf | ssh root@NAS 'tar xf - -C /'
 ssh root@NAS 'grep -q web-session /etc/settings || echo /etc/web-session.conf >> /etc/settings'
 ```
@@ -111,9 +111,9 @@ What is checked:
 
 - Syntax of every script (host `sh -n`, BusyBox `ash -n`) and `shellcheck -s sh` on the new scripts.
 - `test-auth.sh` (56 checks): first-time password, wrong and right password, one-time challenge, cookie flags, return-to-page safety (open redirect, header injection, classic pages coming back inside their frames), the first-time wizard, forged and malformed cookies, two devices at once, idle and absolute timeouts, expiry cleanup, address binding, cross-site POSTs, sign out.
-- `test-files.sh` (100 checks): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
+- `test-files.sh` (100 checks) and `test-upload.sh` (75 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
 
-Last run: 56 of 56 and 100 of 100 passed, with BusyBox 1.31.1 built from the NAS configuration. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
+Last run: 56, 100 and 75 checks, all passed, with BusyBox 1.31.1 built from the NAS configuration. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
 
 What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and a full Buildroot build.
 
@@ -122,6 +122,8 @@ What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and 
 - The file browser only shows what is inside `/mnt`. A symlink that points outside `/mnt` is hidden and cannot be opened. Every path goes through `realpath`, must start with `/mnt` before and after resolving, and anything with a control character or NUL is refused.
 - Names come from the shell, not `ls`: this BusyBox has no Unicode support and `ls` prints every non-ASCII byte as `?`. Dot files, `lost+found` and names containing control characters are not listed. Folders show at most 1000 entries (a note appears).
 - Folders download as a `.tar` archive (Download folder on each folder, Download this folder at the top). This image has no `zip` program, and adding one would change the firmware build, so tar it is. Windows 10 (1803 or later) and macOS open `.tar` files; older Windows needs 7-Zip. Links inside a folder are stored as links, never followed, and the archive is streamed without a size, so the browser shows no percentage. The top-level All disks view cannot be downloaded.
+- **Uploads.** Inside a disk's folder, drag files or folders onto the box, or use Upload files / Upload a folder. Each file is one request, sent in turn, with a progress bar and a Stop button. The body is streamed to a hidden temporary file in the target folder and renamed when complete, so a dropped connection leaves nothing behind. An existing file is never replaced: the new one is saved as `name (2).ext`. Folder structure is kept. New files take the owner and group of the folder and mode 664 (folders 775), so Samba users can still change them. Without JavaScript there is a plain single-file upload form on the simple page.
+- Upload limits: 2 GB per file (BusyBox `httpd` reads the length as a signed 32-bit number), and free space is checked before the first byte is sent. Empty folders are not uploaded. Choosing a folder to upload needs a desktop browser; phones can upload files only. Names with control characters, `.`, `..` or a leading `.upload-` are refused, and a symlink anywhere in the target path is refused. The all-disks root cannot be uploaded into.
 - Downloads have no resume (BusyBox `httpd` has no Range support). HTML, SVG and unknown types always download; only images, PDF, audio, video and plain text can open in the browser.
 - A file swapped for a symlink in the instant between the path check and the read could in theory escape. Only someone who already has write access to the shared disks could try it.
 - `status.cgi` used to be open to anyone on the network. It now needs a login.
@@ -132,7 +134,7 @@ What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and 
 
 **Signing in.** Open the NAS address in your browser. Type the NAS password. Tick "Keep me signed in on this device" on your own computer or phone, and leave it empty on someone else's. You stay signed in for the day, and for up to a week if you ticked the box.
 
-**Finding a file.** Tap **Files**. Tap a folder to open it. Tap a file to download it, or tap Download folder to get a whole folder as one `.tar` file. Pictures, PDFs and music also have an "Open in browser" link. Use the box at the top to type part of a name, and the menu next to it to put the newest or biggest files first.
+**Finding a file.** Tap **Files**. Tap a folder to open it. To add files, open a folder on a disk and drag them onto the box, or tap Upload files. Tap a file to download it, or tap Download folder to get a whole folder as one `.tar` file. Pictures, PDFs and music also have an "Open in browser" link. Use the box at the top to type part of a name, and the menu next to it to put the newest or biggest files first.
 
 **Is everything OK?** The Home page says so in the green box at the top. If it turns yellow or red, tap it, read the sentence, and show it to whoever looks after the NAS.
 

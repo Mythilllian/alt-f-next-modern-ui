@@ -169,3 +169,79 @@ fs_list() {
 		}
 	}'
 }
+
+# ------------------------------------------------------------------
+# Uploads (files_put.cgi)
+# ------------------------------------------------------------------
+
+# fs_name_ok <relative path>: a plain name or a/b/c made of ordinary names.
+# No leading or trailing slash, no empty, "." or ".." parts, no control characters.
+fs_name_ok() {
+	case "$1" in
+		''|/*|*/|*//*|*[[:cntrl:]]*) return 1 ;;
+	esac
+	if test "${#1}" -gt 1000; then return 1; fi
+	_ok=0
+	_oifs=$IFS; IFS=/; set -f
+	for _s in $1; do
+		case "$_s" in
+			.|..|.upload-*) _ok=1 ;;
+		esac
+		if test "${#_s}" -gt 255; then _ok=1; fi
+	done
+	IFS=$_oifs; set +f
+	return $_ok
+}
+
+# fs_free_kb <dir>: free space in KB
+fs_free_kb() {
+	df -k "$1" 2>/dev/null | awk 'NR == 2 { printf "%.0f", $4 }'
+}
+
+# fs_owner <dir>: sets FS_UID and FS_GID to the owner of a folder, so uploaded files
+# can still be changed from other computers through Samba.
+fs_owner() {
+	set -f
+	set -- $(ls -ldn "$1" 2>/dev/null)
+	set +f
+	FS_UID=$3; FS_GID=$4
+}
+
+fs_own() {	# fs_own <path> <mode>
+	if test -n "$FS_UID" -a -n "$FS_GID"; then chown "$FS_UID:$FS_GID" "$1" 2>/dev/null; fi
+	chmod "$2" "$1" 2>/dev/null
+}
+
+# fs_mkpath <base> <relative folder path>: create the folders one part at a time.
+# A part that is a symlink is refused, so nothing can lead out of /mnt.
+fs_mkpath() {
+	_cur=$1
+	_rc=0
+	_oifs=$IFS; IFS=/; set -f
+	for _s in $2; do
+		_cur="$_cur/$_s"
+		if test -L "$_cur"; then _rc=1; break; fi
+		if test -d "$_cur"; then continue; fi
+		if test -e "$_cur"; then _rc=1; break; fi
+		if ! mkdir "$_cur" 2>/dev/null; then _rc=1; break; fi
+		fs_own "$_cur" 775
+	done
+	IFS=$_oifs; set +f
+	FS_TARGET=$_cur
+	return $_rc
+}
+
+# fs_unique <dir> <name>: sets FS_FINAL to a name that is not taken, adding " (2)",
+# " (3)" and so on before the extension. Nothing is ever overwritten.
+fs_unique() {
+	FS_FINAL=$2
+	_n=2
+	case "$2" in
+		?*.*) _b=${2%.*}; _e=.${2##*.} ;;
+		*) _b=$2; _e="" ;;
+	esac
+	while test -e "$1/$FS_FINAL" -o -L "$1/$FS_FINAL"; do
+		FS_FINAL="$_b ($_n)$_e"
+		_n=$((_n + 1))
+	done
+}

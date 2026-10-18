@@ -22,10 +22,10 @@ if [ -n "$SHELLCHECK" ]; then
 	echo "== shellcheck (new and rewritten scripts)"
 	( cd "$CGI" && "$SHELLCHECK" -s sh -S warning -e SC1091,SC3046,SC3051,SC2034,SC3037,SC3021,SC2046 \
 		home.cgi shares.cgi advanced.cgi classic.cgi confirm.cgi files.cgi files_list.cgi \
-		files_get.cgi login.cgi logout.cgi fs_common.sh ) || rc=1
+		files_get.cgi files_put.cgi login.cgi logout.cgi fs_common.sh ) || rc=1
 fi
 
-for t in test-auth test-files; do
+for t in test-auth test-files test-upload; do
 	echo "== $t"
 	sh "$HERE/$t.sh" || rc=1
 done
