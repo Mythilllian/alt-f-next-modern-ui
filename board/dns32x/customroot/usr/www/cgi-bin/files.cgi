@@ -19,7 +19,7 @@ if test "$(fs_param nojs)" = 1; then
 		echo '<nav aria-label="You are here"><ol class="crumbs">'
 		echo "<li><a href=\"/cgi-bin/files.cgi?nojs=1&amp;p=$FS_ROOT\">All disks</a></li>"
 		_acc=$FS_ROOT
-		_rest=${FS_REAL#$FS_ROOT}
+		_rest=${FS_REAL#"$FS_ROOT"}
 		_oifs=$IFS; IFS=/; set -f
 		for _seg in $_rest; do
 			if test -z "$_seg"; then continue; fi

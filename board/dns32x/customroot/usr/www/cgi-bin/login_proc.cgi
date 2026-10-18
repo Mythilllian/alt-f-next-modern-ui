@@ -37,7 +37,7 @@ login_error() {
 
 try_again() {
 	sleep 2
-	_back=/cgi-bin/login.cgi?e=1
+	_back="/cgi-bin/login.cgi?e=1"
 	if test -n "$from_url"; then _back="$_back&f=$from_url"; fi
 	gotopage "$_back"
 }
@@ -98,7 +98,7 @@ else
 		# only ever send people to a page on this NAS, and refuse anything that could
 		# smuggle in extra response headers
 		case "$want" in
-			/cgi-bin/login*|/cgi-bin/logout*) ;;
+			/cgi-bin/login*|/cgi-bin/logout*|*..*) ;;
 			/cgi-bin/*[!-A-Za-z0-9_./?=\&%:+~,@]*) ;;
 			/cgi-bin/*) loc=$want ;;
 		esac

@@ -17,7 +17,7 @@ BB=${BB:-$(command -v busybox)}
 
 setup() {
 	rm -rf "$SANDBOX"
-	mkdir -p "$SANDBOX/bin" "$SANDBOX/etc" "$SANDBOX/tmp" "$SANDBOX/mnt" "$SANDBOX/stubs"
+	mkdir -p "$SANDBOX/bin" "$SANDBOX/etc/samba" "$SANDBOX/tmp" "$SANDBOX/mnt" "$SANDBOX/stubs"
 	cp -r "$WWW_SRC" "$SANDBOX/www"
 	# applets the scripts expect
 	for a in sh ash httpd hexdump md5sum dd cut sed awk tr date realpath readlink ls head tail \
@@ -31,8 +31,12 @@ setup() {
 			-e "s|/etc/web-secret|$SANDBOX/etc/web-secret|g" \
 			-e "s|/etc/web-session.conf|$SANDBOX/etc/web-session.conf|g" \
 			-e "s|/tmp/sessions|$SANDBOX/tmp/sessions|g" \
+			-e "s|/tmp/firstboot|$SANDBOX/tmp/firstboot|g" \
+			-e "s|/tmp/fsl\.|$SANDBOX/tmp/fsl.|g" \
 			-e "s|/etc/Alt-F|$SANDBOX/etc/Alt-F|g" \
 			-e "s|/etc/samba/smb.conf|$SANDBOX/etc/smb.conf|g" \
+			-e "s|/etc/samba/|$SANDBOX/etc/samba/|g" \
+			-e "s|/etc/rsyncd.secrets|$SANDBOX/etc/rsyncd.secrets|g" \
 			-e "s|/etc/inetd.conf|$SANDBOX/etc/inetd.conf|g" \
 			-e "s|/mnt|$SANDBOX/mnt|g" "$f"
 	done
@@ -40,9 +44,13 @@ setup() {
 	cp "$HERE/../customroot/etc/samba/smb.conf" "$SANDBOX/etc/smb.conf"
 	cp "$HERE/../customroot/etc/inetd.conf" "$SANDBOX/etc/inetd.conf"
 	echo "test" > "$SANDBOX/etc/Alt-F"
-	for c in loadsave_settings smartctl plabel tune2fs blkid smbstatus showmount; do
+	for c in smartctl plabel tune2fs blkid smbstatus showmount smbpasswd chpasswd; do
 		printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/stubs/$c"; chmod +x "$SANDBOX/stubs/$c"
 	done
+	# loadsave_settings: "-ls" lists saved settings (none here), "-st" says nothing changed
+	printf '#!/bin/sh\ncase "$1" in -ls) exit 0 ;; *) exit 1 ;; esac\n' > "$SANDBOX/stubs/loadsave_settings"
+	chmod +x "$SANDBOX/stubs/loadsave_settings"
+	: > "$SANDBOX/etc/rsyncd.secrets"
 }
 
 start() {
