@@ -1,7 +1,7 @@
 #!/bin/sh
 
 source ./common.sh
-check_cookie
+case "$QUERY_STRING" in refresh=*) check_cookie api ;; *) check_cookie ;; esac
 
 # Based on original idea and code contributed by Dwight Hubbard, dwight.hubbard <guess> gmail.com
 # Modified and adapted by Joao Cardoso

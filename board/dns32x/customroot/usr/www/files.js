@@ -51,7 +51,7 @@
       })
       .then(function (res) {
         if (!res) return;
-        if (!res.ok) { cb(res.j.error || 'Something went wrong.'); return; }
+        if (!res.ok || res.j.error || !res.j.entries) { cb(res.j.error || 'Something went wrong.'); return; }
         cache[path] = res.j;
         cb(null, res.j);
       })
@@ -377,10 +377,10 @@
       x.onload = function () {
         sent += q.file.size;
         if (x.status === 401) { window.location.reload(); return; }
-        if (x.status === 200) { done++; } else {
-          var m = 'Could not upload.';
-          try { m = JSON.parse(x.responseText).error || m; } catch (e) { /* keep the generic text */ }
-          failed.push(q.rel + ': ' + m);
+        var reply = {};
+        try { reply = JSON.parse(x.responseText); } catch (e) { /* not JSON: treated as a failure below */ }
+        if (x.status === 200 && reply.ok === true) { done++; } else {
+          failed.push(q.rel + ': ' + (reply.error || 'Could not upload.'));
         }
         i++;
         step();
@@ -414,7 +414,7 @@
       })
       .then(function (res) {
         if (!res) return;
-        if (!res.ok) { say(res.j.error || 'Something went wrong.'); return; }
+        if (!res.ok || res.j.error) { say(res.j.error || 'Something went wrong.'); return; }
         if (total > res.j.free * 1024) {
           say('There is not enough room on the disk: ' + fmtSize(total) + ' to upload, ' + fmtSize(res.j.free * 1024) + ' free.');
           return;

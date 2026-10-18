@@ -29,10 +29,10 @@ curl -s -c "$JAR" -o /dev/null -d "salt=$salt&pwhash=$hash" "$H/cgi-bin/login_pr
 enc() { python3 -c 'import sys,urllib.parse as u; print(u.quote(sys.argv[1], safe=""))' "$1"; }
 # put <folder> <name (raw, will be encoded)> <file> [extra curl args]  -> prints "<status> <body>"
 put() { d=$1; n=$2; f=$3; shift 3
-	curl -s -b "$JAR" -H "Origin: $H" -H 'X-Requested-With: XMLHttpRequest' -w ' %{http_code}' --data-binary "@$f" "$@" \
+	curl -s -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -H 'X-Requested-With: XMLHttpRequest' -w ' %{http_code}' --data-binary "@$f" "$@" \
 		"$H/cgi-bin/files_put.cgi?p=$(enc "$d")&n=$(enc "$n")"; }
 putraw() { d=$1; n=$2; f=$3; shift 3   # n already encoded
-	curl -s -b "$JAR" -H "Origin: $H" -H 'X-Requested-With: XMLHttpRequest' -w ' %{http_code}' --data-binary "@$f" "$@" \
+	curl -s -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -H 'X-Requested-With: XMLHttpRequest' -w ' %{http_code}' --data-binary "@$f" "$@" \
 		"$H/cgi-bin/files_put.cgi?p=$(enc "$d")&n=$n"; }
 code() { echo "${1##* }"; }
 
@@ -40,7 +40,7 @@ U=$M/Disk1/Up
 printf 'hello upload\n' > "$SANDBOX/a.txt"
 
 echo "== access"
-check "no session is 401" "$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $H" --data-binary @"$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?p=$(enc "$U")&n=a.txt")" 401
+check "no session is 401" "$(curl -s -o /dev/null -w '%{http_code}' -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" --data-binary @"$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?p=$(enc "$U")&n=a.txt")" 401
 check "no Origin or Referer is 403" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'X-Requested-With: XMLHttpRequest' --data-binary @"$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?p=$(enc "$U")&n=a.txt")" 403
 check "another site's Origin is 403" "$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -H 'Origin: http://evil.example' --data-binary @"$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?p=$(enc "$U")&n=a.txt")" 403
 [ ! -e "$U/a.txt" ] && ok "nothing was written by the refused requests" || bad "refused request wrote a file"
@@ -133,14 +133,14 @@ check "no temporary files are left" "$(find "$M" -name '.upload-*' | wc -l | tr 
 
 echo "== form upload (no JavaScript)"
 printf 'form file\r\n--x--\r\nend' > "$SANDBOX/form file.bin"
-h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -F "file=@$SANDBOX/form file.bin" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")" | tr -d '\r')
+h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -F "file=@$SANDBOX/form file.bin" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")" | tr -d '\r')
 echo "$h" | grep -q '^Location: /cgi-bin/files.cgi?nojs=1&p=.*&up=ok$' && ok "form upload redirects back with success" || bad "form redirect: $h"
 cmp -s "$SANDBOX/form file.bin" "$U/form file.bin" && ok "multipart body arrives byte for byte" || { bad "multipart bytes differ"; ls -l "$U/form file.bin"; }
-: > "$SANDBOX/empty.bin"; curl -s -o /dev/null -b "$JAR" -H "Origin: $H" -F "file=@$SANDBOX/empty.bin" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")"
+: > "$SANDBOX/empty.bin"; curl -s -o /dev/null -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -F "file=@$SANDBOX/empty.bin" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")"
 [ -f "$U/empty.bin" ] && [ ! -s "$U/empty.bin" ] && ok "an empty file uploads as an empty file" || bad "empty file"
-h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -F "file=@$SANDBOX/a.txt;filename=../../evil.txt" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")" | tr -d '\r')
+h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -F "file=@$SANDBOX/a.txt;filename=../../evil.txt" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$U")" | tr -d '\r')
 [ -f "$U/evil.txt" ] && [ ! -e "$M/evil.txt" ] && ok "a path in the file name is cut down to the name" || bad "form path handling"
-h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -F "file=@$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$M")" | tr -d '\r')
+h=$(curl -s -D - -o /dev/null -b "$JAR" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -F "file=@$SANDBOX/a.txt" "$H/cgi-bin/files_put.cgi?form=1&p=$(enc "$M")" | tr -d '\r')
 echo "$h" | grep -q 'up=root' && ok "form upload to the all-disks root is refused" || bad "form root: $h"
 curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$U")&up=ok" | grep -q 'Upload a file here' && ok "the simple page has the upload form" || bad "no form on the simple page"
 curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M")" | grep -q 'Upload a file here' && bad "form shown at the root" || ok "no upload form at the all-disks root"

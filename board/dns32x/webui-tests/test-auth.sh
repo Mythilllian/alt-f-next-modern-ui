@@ -15,6 +15,9 @@ sh "$HERE/harness.sh" stop >/dev/null 2>&1
 sh "$HERE/harness.sh" start >/dev/null || exit 1
 trap 'sh "$HERE/harness.sh" stop' EXIT
 
+# BusyBox 1.20 httpd (earlier Alt-F releases) only passes a few request headers to CGIs:
+# no Origin, no Sec-Fetch-*. The code falls back to Referer / the classic redirect.
+OLD=0; "$BB" 2>&1 | head -1 | grep -q 'v1\.[0-2][0-9]\.' && OLD=1
 ok()   { PASS=$((PASS + 1)); echo "ok   $1"; }
 bad()  { FAIL=$((FAIL + 1)); echo "FAIL $1"; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
@@ -36,8 +39,10 @@ echo "$h" | grep -q '^Set-Cookie: ALTSID=[0-9a-f]\{64\};' && ok "choosing a pass
 check "password file written" "$(cat "$SANDBOX/etc/web-secret" 2>/dev/null)" secretpw
 check "first sign in starts the setup wizard" "$(cat "$SANDBOX/tmp/firstboot" 2>/dev/null)" host
 echo "$h" | grep -q '^Location: /cgi-bin/classic.cgi?p=/cgi-bin/host.cgi' && ok "the wizard opens inside the classic frames" || bad "wizard location: $h"
+if [ "$OLD" = 1 ]; then ok "(skipped on BusyBox 1.20: httpd hides Sec-Fetch-Dest)"; else
 hdr -b "$SANDBOX/j0" -H 'Sec-Fetch-Dest: document' "$H/cgi-bin/home.cgi" | grep -q '^Location: /cgi-bin/classic.cgi?p=/cgi-bin/host.cgi' && ok "a new page opened on its own continues the wizard in the classic frames" || bad "wizard redirect for top-level pages"
 hdr -b "$SANDBOX/j0" -H 'Sec-Fetch-Dest: frame' "$H/cgi-bin/home.cgi" | grep -q '^Location: /cgi-bin/host.cgi' && ok "inside the frames the classic redirect is used (no nested frames)" || bad "wizard redirect inside frames"
+fi
 rm -f "$SANDBOX/tmp/firstboot"   # the rest of the tests are about normal use
 
 echo "== sign in"
@@ -59,7 +64,7 @@ s=$(newsalt)
 h=$(hdr -d "salt=$s&passwd=secretpw&keep=yes" "$H/cgi-bin/login_proc.cgi")
 echo "$h" | grep -q 'Max-Age=604800' && ok "no-JavaScript sign in works, keep-me-signed-in sets Max-Age" || bad "plain form login: $h"
 s=$(newsalt)
-h=$(hdr -H 'Origin: https://nas.local' -d "salt=$s&pwhash=$(md5 "secretpw$s")" "$H/cgi-bin/login_proc.cgi")
+h=$(hdr -H 'Origin: https://nas.local' -H 'Referer: https://nas.local/cgi-bin/login.cgi' -d "salt=$s&pwhash=$(md5 "secretpw$s")" "$H/cgi-bin/login_proc.cgi")
 echo "$h" | grep -q '; Secure' && ok "cookie is Secure when signed in over https" || bad "secure flag"
 
 echo "== safe redirects after sign in"
@@ -99,7 +104,7 @@ check "POST with no Origin or Referer" "$(status -b "$SANDBOX/j1" -d x=1 "$H/cgi
 check "POST from another site" "$(status -b "$SANDBOX/j1" -H 'Origin: http://evil.example' -d x=1 "$H/cgi-bin/sys_utils_proc.cgi")" 403
 check "POST with a spoofed Referer host" "$(status -b "$SANDBOX/j1" -H 'Referer: http://evil.example/127.0.0.1:'$PORT -d x=1 "$H/cgi-bin/sys_utils_proc.cgi")" 403
 check "POST with Origin null" "$(status -b "$SANDBOX/j1" -H 'Origin: null' -d x=1 "$H/cgi-bin/sys_utils_proc.cgi")" 403
-c=$(hdr -b "$SANDBOX/j1" -H "Origin: $H" -d x=1 "$H/cgi-bin/sys_utils_proc.cgi")
+c=$(hdr -b "$SANDBOX/j1" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -d x=1 "$H/cgi-bin/sys_utils_proc.cgi")
 if echo "$c" | grep -q '^HTTP/1.[01] 403' || echo "$c" | grep -q '^Location: /cgi-bin/login'; then bad "same-site POST was blocked"; else ok "POST from the same site is let through"; fi
 
 echo "== timeouts"
@@ -129,7 +134,7 @@ login "$SANDBOX/j7" secretpw
 
 echo "== sign out"
 check "signed in before sign out" "$(status -b "$SANDBOX/j7" "$H/cgi-bin/home.cgi")" 200
-hdr -b "$SANDBOX/j7" -H "Origin: $H" -X POST "$H/cgi-bin/logout.cgi" | grep -q 'Set-Cookie: ALTSID=;.*Max-Age=0' && ok "sign out expires the cookie" || bad "logout cookie"
+hdr -b "$SANDBOX/j7" -H "Origin: $H" -H "Referer: $H/cgi-bin/files.cgi" -X POST "$H/cgi-bin/logout.cgi" | grep -q 'Set-Cookie: ALTSID=;.*Max-Age=0' && ok "sign out expires the cookie" || bad "logout cookie"
 check "session no longer works" "$(status -b "$SANDBOX/j7" "$H/cgi-bin/home.cgi")" 303
 
 echo

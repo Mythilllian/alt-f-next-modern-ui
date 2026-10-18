@@ -110,7 +110,7 @@ fi
 
 sess_new "${keep:-no}"
 secure=""
-case "$HTTP_ORIGIN" in https://*) secure=yes ;; esac
+case "${HTTP_ORIGIN:-$HTTP_REFERER}" in https://*) secure=yes ;; esac
 
 printf 'HTTP/1.1 303\r\nContent-Type: text/html\r\nCache-Control: no-store\r\n'
 sess_cookie "${keep:-no}" "$secure"

@@ -47,15 +47,39 @@ fs_message() {
 	esac
 }
 
+# Newer BusyBox (1.31) lists full dates with "ls --full-time", older ones (1.20, used by
+# earlier Alt-F releases) with "ls -e". Ask once which one this system understands.
+FS_LSOPT=""
+fs_lsopt() {
+	if test -z "$FS_LSOPT"; then
+		if ls -ln --full-time /dev/null > /dev/null 2>&1; then FS_LSOPT=--full-time; else FS_LSOPT=-e; fi
+	fi
+}
+
+# fs_datetime <five date fields of a long listing>: sets FS_DT to "YYYY-MM-DD HH:MM:SS".
+# --full-time gives "2026-10-17 23:16:30 +0000", -e gives "Sat Oct 17 23:16:30 2026".
+fs_datetime() {
+	if test "$FS_LSOPT" = --full-time; then FS_DT="$1 $2"; return; fi
+	case "$2" in
+		Jan) _m=01 ;; Feb) _m=02 ;; Mar) _m=03 ;; Apr) _m=04 ;; May) _m=05 ;; Jun) _m=06 ;;
+		Jul) _m=07 ;; Aug) _m=08 ;; Sep) _m=09 ;; Oct) _m=10 ;; Nov) _m=11 ;; Dec) _m=12 ;;
+		*) _m=01 ;;
+	esac
+	_d=$3
+	case "$_d" in ?) _d=0$_d ;; esac
+	FS_DT="$5-$_m-$_d $4"
+}
+
 # fs_one <path>: print "type size date time" of the thing a path points to, following
 # symlinks. Prints nothing if it is gone or is neither a file nor a folder.
 fs_one() {
+	fs_lsopt
 	set -f
-	set -- $(ls -lndL --full-time "$1" 2>/dev/null)
+	set -- $(ls -lndL $FS_LSOPT "$1" 2>/dev/null)
 	set +f
 	case "$1" in
-		-*) echo "f $5 $6 $7" ;;
-		d*) echo "d 0 $6 $7" ;;
+		-*) fs_datetime "$6" "$7" "$8" "$9" "${10}"; echo "f $5 $FS_DT" ;;
+		d*) fs_datetime "$6" "$7" "$8" "$9" "${10}"; echo "d 0 $FS_DT" ;;
 	esac
 }
 
@@ -68,8 +92,9 @@ fs_one() {
 # for separately instead. Dot files and names with control characters are left out.
 fs_tsv() {
 	_dir=$1
+	fs_lsopt
 	_tmp=$(mktemp /tmp/fsl.XXXXXX) || return 1
-	ls -ln --full-time "$_dir" > "$_tmp" 2>/dev/null
+	ls -ln $FS_LSOPT "$_dir" > "$_tmp" 2>/dev/null
 	set -- "$_dir"/*
 	if test "$#" -eq 1 && ! test -e "$1" -o -L "$1"; then rm -f "$_tmp"; return 0; fi
 	_lines=$(grep -c '^[-dlbcps]' "$_tmp")
@@ -79,11 +104,13 @@ fs_tsv() {
 	while test "$#" -gt 0; do
 		_f=$1; shift
 		if test -n "$_fast"; then
-			read -r _perm _l1 _l2 _l3 _size _date _time _rest <&3
+			read -r _perm _l1 _l2 _l3 _size _d1 _d2 _d3 _d4 _d5 _rest <&3
 			if test -n "$_first" -a "$_perm" = total; then
-				read -r _perm _l1 _l2 _l3 _size _date _time _rest <&3
+				read -r _perm _l1 _l2 _l3 _size _d1 _d2 _d3 _d4 _d5 _rest <&3
 			fi
 			_first=""
+			fs_datetime "$_d1" "$_d2" "$_d3" "$_d4" "$_d5"
+			_dt=$FS_DT
 		fi
 		_name=${_f##*/}
 		case "$_name" in *[[:cntrl:]]*|lost+found) continue ;; esac
@@ -98,21 +125,23 @@ fs_tsv() {
 					_r=$(realpath "$_f" 2>/dev/null)
 					case "$_r" in "$FS_ROOT"|"$FS_ROOT"/*)
 						_info=$(fs_one "$_f")
-						if test -n "$_info"; then read -r _type _size _date _time <<-EOT
+						if test -n "$_info"; then read -r _type _size _dd _tt <<-EOT
 							$_info
 						EOT
+							_dt="$_dd $_tt"
 						fi ;;
 					esac ;;
 			esac
 		else
 			_info=$(fs_one "$_f")
-			if test -n "$_info"; then read -r _type _size _date _time <<-EOT
+			if test -n "$_info"; then read -r _type _size _dd _tt <<-EOT
 				$_info
 			EOT
+				_dt="$_dd $_tt"
 			fi
 		fi
 		if test -z "$_type"; then continue; fi
-		printf '%s\t%s\t%s %s\t%s\n' "$_type" "$_size" "$_date" "$_time" "$_name"
+		printf '%s\t%s\t%s\t%s\n' "$_type" "$_size" "$_dt" "$_name"
 		_count=$((_count + 1))
 	done 3< "$_tmp"
 	rm -f "$_tmp"
@@ -121,7 +150,7 @@ fs_tsv() {
 # fs_list <dir> <json|html>: one level only, as a JSON document or an HTML list
 fs_list() {
 	# the directory name travels in the environment: awk -v would interpret backslashes in it
-	fs_tsv "$1" | FS_DIR="$1" awk -F'\t' -v mode="$2" '
+	fs_tsv "$1" | FS_DIR="$1" awk -v mode="$2" '
 	function jesc(s) {
 		gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
 		return s
@@ -140,6 +169,7 @@ fs_list() {
 		return r
 	}
 	BEGIN {
+		FS = "\t"	# set here: older BusyBox does not unescape awk -F'\t'
 		dir = ENVIRON["FS_DIR"]
 		for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
 		n = 0; trunc = 0

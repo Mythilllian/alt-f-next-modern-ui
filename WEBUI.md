@@ -111,11 +111,22 @@ What is checked:
 
 - Syntax of every script (host `sh -n`, BusyBox `ash -n`) and `shellcheck -s sh` on the new scripts.
 - `test-auth.sh` (56 checks): first-time password, wrong and right password, one-time challenge, cookie flags, return-to-page safety (open redirect, header injection, classic pages coming back inside their frames), the first-time wizard, forged and malformed cookies, two devices at once, idle and absolute timeouts, expiry cleanup, address binding, cross-site POSTs, sign out.
-- `test-files.sh` (100 checks) and `test-upload.sh` (75 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
+- `test-files.sh` (100 checks) and `test-upload.sh` (78 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
 
-Last run: 56, 100 and 75 checks, all passed, with BusyBox 1.31.1 built from the NAS configuration. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
+Last run: 56, 100 and 78 checks, all passed, on BusyBox 1.31.1 built from the repo configuration and on BusyBox 1.20.2. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
 
 What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and a full Buildroot build.
+
+## Older Alt-F releases (BusyBox 1.20)
+
+A box still running an older Alt-F release has BusyBox 1.20.2, which differs from the 1.31.1 in this repo. The new pages are written for both, and the whole test suite passes on both:
+
+- `ls` has no `--full-time` there (it has `-e`); the file browser asks which one works.
+- `awk -F'\t'` does not unescape the tab there, so the file list sets `FS` inside the program.
+- `httpd` there hides most request headers: no `Origin`, no `Sec-Fetch-*`, no `X-Requested-With`. The cross-site check falls back to `Referer` (browsers always send it on same-site form and upload posts), file and status requests ask for a 401 explicitly, and a server that ignores `Status:` is handled by checking the JSON body.
+- Shell arithmetic is 32 bits there, so disk sizes are formatted in awk.
+
+To test against 1.20 build `busybox-1.20.2` with `make defconfig` plus `CONFIG_EXTRA_CFLAGS="-include compat.h"` (a header that includes `sys/resource.h` and defines a stub `stime`), and disable `FEATURE_INETD_RPC` and `FEATURE_MOUNT_NFS`.
 
 ## Things worth knowing
 
