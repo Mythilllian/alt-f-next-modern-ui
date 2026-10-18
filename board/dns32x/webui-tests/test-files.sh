@@ -146,6 +146,13 @@ if grep -rq "^root:" "$SANDBOX/x" 2>/dev/null; then bad "archive leaked /etc con
 check "archive of a missing folder is 404" "$(gcode "$(enc "$M/Disk1/nope")")" 404
 check "archive of an escaping link is refused" "$(gcode "$(enc "$M/Disk1/escape")")" 403
 
+echo "== up one folder"
+up() { curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$1")" | grep -o 'href="[^"]*" aria-label="Up one folder"' | head -1; }
+check "a disk's folder links up to all disks" "$(up "$M/Disk1")" "href=\"/cgi-bin/files.cgi?nojs=1&amp;p=$M\" aria-label=\"Up one folder\""
+check "a sub folder links up to its parent" "$(up "$M/Disk1/Photos")" "href=\"/cgi-bin/files.cgi?nojs=1&amp;p=$M/Disk1\" aria-label=\"Up one folder\""
+check "the all-disks view has no up row" "$(up "$M")" ""
+curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1/empty")" | grep -q 'This folder is empty' && ok "an empty folder still shows the up row and its message" || bad "empty folder page"
+
 echo "== simple (no JavaScript) page"
 page=$(curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")")
 echo "$page" | grep -q 'it&#39;s\|it&apos;s\|it.s &quot;quoted&quot; &amp; more.txt' && ok "html page escapes quotes and ampersand" || bad "html escaping"

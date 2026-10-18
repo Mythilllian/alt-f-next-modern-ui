@@ -149,8 +149,11 @@ fs_tsv() {
 
 # fs_list <dir> <json|html>: one level only, as a JSON document or an HTML list
 fs_list() {
-	# the directory name travels in the environment: awk -v would interpret backslashes in it
-	fs_tsv "$1" | FS_DIR="$1" awk -v mode="$2" '
+	# the directory names travel in the environment: awk -v would interpret backslashes in them
+	_up=${1%/*}
+	case "$_up" in "$FS_ROOT"|"$FS_ROOT"/*) ;; *) _up=$FS_ROOT ;; esac
+	if test "$1" = "$FS_ROOT"; then _up=""; fi
+	fs_tsv "$1" | FS_DIR="$1" FS_UP="$_up" awk -v mode="$2" '
 	function jesc(s) {
 		gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s)
 		return s
@@ -174,7 +177,11 @@ fs_list() {
 		for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
 		n = 0; trunc = 0
 		if (mode == "json") printf "{\"path\":\"%s\",\"entries\":[", jesc(dir)
-		else print "<ul class=\"files\">"
+		else {
+			print "<ul class=\"files\">"
+			if (ENVIRON["FS_UP"] != "")
+				printf "<li><div class=\"row\"><div class=\"head\"><a class=\"name\" href=\"/cgi-bin/files.cgi?nojs=1&amp;p=%s\" aria-label=\"Up one folder\"><span class=\"ico\" aria-hidden=\"true\">&#11014;</span>..</a></div><span class=\"meta\">Up one folder</span></div></li>\n", uenc(ENVIRON["FS_UP"])
+		}
 	}
 	$0 == "!truncated" { trunc = 1; next }
 	NF >= 4 {

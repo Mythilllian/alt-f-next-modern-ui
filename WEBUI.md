@@ -9,7 +9,7 @@ This branch (`webui`) adds a simpler, friendlier web interface next to the class
 | Look | One stylesheet (`alt-f.css`), light and dark themes that follow the system with an Automatic / Light / Dark switch in the footer, layouts from a 320 px phone to a 4K screen, 44 px tap targets, visible focus rings, reduced-motion support. |
 | Home | Four cards: Files, Disk health and space, Shared folders, Is everything OK? Written in plain language. |
 | Health | The old status page, rebuilt on the shared shell, with a plain-language summary on top. All the technical tables are still there. |
-| Files | A browser for `/mnt` with downloads and uploads of files and whole folders: one folder level at a time, a tree on wide screens and a plain list on phones, breadcrumbs, sort by name/size/date, a filter box, human-readable sizes and dates, and download links. |
+| Files | A browser for `/mnt` with downloads and uploads of files and whole folders: one folder level at a time, a tree on wide screens and a plain list on phones, breadcrumbs, a `..` row at the top of every folder that goes up one level, sort by name/size/date, a filter box, human-readable sizes and dates, and download links. |
 | Sign-in | One login per device. Sessions slide with activity (8 hours idle, 7 days at most by default), "Keep me signed in on this device", and a Sign out button. |
 | Advanced | Every classic settings page, built from the `.men` menu files, plus SSH status (read-only) and Restart / Switch off. Pages that can erase data or break the network ask for confirmation first. |
 
@@ -111,9 +111,9 @@ What is checked:
 
 - Syntax of every script (host `sh -n`, BusyBox `ash -n`) and `shellcheck -s sh` on the new scripts.
 - `test-auth.sh` (56 checks): first-time password, wrong and right password, one-time challenge, cookie flags, return-to-page safety (open redirect, header injection, classic pages coming back inside their frames), the first-time wizard, forged and malformed cookies, two devices at once, idle and absolute timeouts, expiry cleanup, address binding, cross-site POSTs, sign out.
-- `test-files.sh` (100 checks) and `test-upload.sh` (78 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
+- `test-files.sh` (104 checks) and `test-upload.sh` (78 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
 
-Last run: 56, 100 and 78 checks, all passed, on BusyBox 1.31.1 built from the repo configuration and on BusyBox 1.20.2. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
+Last run: 56, 104 and 78 checks, all passed, on BusyBox 1.31.1 built from the repo configuration and on BusyBox 1.20.2. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
 
 What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and a full Buildroot build.
 

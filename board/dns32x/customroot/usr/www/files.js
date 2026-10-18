@@ -229,22 +229,40 @@
     listBox.textContent = '';
     if (!data) return;
     var rows = sorted(data.entries);
+    var ul = el('ul', 'files');
+    if (current !== ROOT) ul.appendChild(upRow());
+    rows.forEach(function (e) { ul.appendChild(row(current, e)); });
+    if (ul.firstChild) listBox.appendChild(ul);
     if (!data.entries.length) {
       listBox.appendChild(message(current === ROOT
         ? 'No disks found. Plug in a drive and refresh.'
         : 'This folder is empty.', current === ROOT ? function () { cache = {}; open(current); } : null));
-      return;
-    }
-    if (!rows.length) {
+    } else if (!rows.length) {
       listBox.appendChild(message('Nothing here matches "' + filter + '".'));
-      return;
     }
-    var ul = el('ul', 'files');
-    rows.forEach(function (e) { ul.appendChild(row(current, e)); });
-    listBox.appendChild(ul);
     if (data.truncated) {
       listBox.appendChild(el('p', 'notice', 'This folder is large, so only the first items are shown. Use the filter to narrow it down.'));
     }
+  }
+
+  /* ".." is always the first row of a folder: one step up, ignoring sort and filter */
+  function upRow() {
+    var parent = current.slice(0, current.lastIndexOf('/'));
+    if (parent.length < ROOT.length) parent = ROOT;
+    var li = el('li');
+    var r = el('div', 'row');
+    var head = el('div', 'head');
+    var b = el('button', 'name');
+    b.type = 'button';
+    b.setAttribute('aria-label', 'Up one folder');
+    b.appendChild(el('span', 'ico', '\u2B06'));
+    b.appendChild(el('span', '', '..'));
+    b.addEventListener('click', function () { open(parent); });
+    head.appendChild(b);
+    r.appendChild(head);
+    r.appendChild(el('span', 'meta', 'Up one folder'));
+    li.appendChild(r);
+    return li;
   }
 
   function render(path) {
