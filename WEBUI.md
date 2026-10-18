@@ -130,7 +130,7 @@ To test against 1.20 build `busybox-1.20.2` with `make defconfig` plus `CONFIG_E
 
 ## Things worth knowing
 
-- Alt-F's own items at the top of each disk (`Alt-F`, `ffp`, `opt`, `lost+found`, `aquota.user`, `aquota.group`, and the boot logs `alt-f.log` and `alt-f.log-previous`) are hidden: not listed, not openable or downloadable, left out of whole-disk archives, and nothing can be uploaded under those names. A folder with one of those names deeper down is treated normally. To work with them use SSH or the classic pages.
+- Alt-F's own items at the top of each disk (`Alt-F`, `ffp`, `opt`, `lost+found`, `aquota.user`, `aquota.group`, the boot logs `alt-f.log` and `alt-f.log-previous`, and leftover temporary files of the zip program) are hidden: not listed, not openable or downloadable, left out of whole-disk archives, and nothing can be uploaded under those names. A folder with one of those names deeper down is treated normally. To work with them use SSH or the classic pages.
 - The file browser only shows what is inside `/mnt`. A symlink that points outside `/mnt` is hidden and cannot be opened. Every path goes through `realpath`, must start with `/mnt` before and after resolving, and anything with a control character or NUL is refused.
 - Names come from the shell, not `ls`: this BusyBox has no Unicode support and `ls` prints every non-ASCII byte as `?`. Dot files, `lost+found` and names containing control characters are not listed. Folders show at most 1000 entries (a note appears).
 - Folders download as a `.tar` archive (Download folder on each folder, Download this folder at the top). This image has no `zip` program, and adding one would change the firmware build, so tar it is. Windows 10 (1803 or later) and macOS open `.tar` files; older Windows needs 7-Zip. Links inside a folder are stored as links, never followed, and the archive is streamed without a size, so the browser shows no percentage. The top-level All disks view cannot be downloaded.
@@ -157,3 +157,4 @@ To test against 1.20 build `busybox-1.20.2` with `make defconfig` plus `CONFIG_E
 **Signing out.** Tap **Sign out** at the top when you are done on a computer that is not yours.
 
 **If something looks wrong.** You never need the Advanced page. Anything there that could erase or switch things off asks "Are you sure?" first, and you can always tap Go back.
+- Zip leftovers: an interrupted `zip` run leaves a temporary file named `zi` plus six letters or digits in the folder it was writing to. The browser hides such a file at the top of a disk only when it is also owned by root, readable by root only, and starts with the zip signature, so look-alike names are never hidden. Delete them over SSH if you don't need them.

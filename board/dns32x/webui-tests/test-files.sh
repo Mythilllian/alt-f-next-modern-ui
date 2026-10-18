@@ -148,6 +148,10 @@ check "archive of an escaping link is refused" "$(gcode "$(enc "$M/Disk1/escape"
 
 echo "== Alt-F's own folders are hidden and protected"
 for n in Alt-F ffp opt lost+found aquota.user aquota.group alt-f.log alt-f.log-previous; do mkdir -p "$M/Disk1/$n/inner"; echo secret > "$M/Disk1/$n/inner/file.txt"; done
+for n in ziAbC123 ziAbC124 ziAbC125 zi12345 ziAbC1234 ziAbC126; do printf 'PK\003\004rest of zip' > "$M/Disk1/$n"; chmod 600 "$M/Disk1/$n"; done
+echo "plain text" > "$M/Disk1/ziAbC124"; chmod 600 "$M/Disk1/ziAbC124"
+chmod 644 "$M/Disk1/ziAbC125"
+ln -s ziAbC123 "$M/Disk1/ziAbC127"
 mkdir -p "$M/Disk1/Photos/opt" && echo ok > "$M/Disk1/Photos/opt/visible.txt"
 list "$(enc "$M/Disk1")" > "$SANDBOX/priv.json"
 python3 - "$SANDBOX/priv.json" <<'PY' && ok "none of Alt-F's names are listed at the top of a disk" || bad "private names listed"
@@ -155,6 +159,8 @@ import json, sys
 names = {e["n"] for e in json.load(open(sys.argv[1], encoding="utf-8"))["entries"]}
 assert not names & {"Alt-F", "ffp", "opt", "lost+found", "aquota.user", "aquota.group", "alt-f.log", "alt-f.log-previous"}, names
 assert {"Photos", "My Docs"} <= names, names
+assert "ziAbC123" not in names and "ziAbC126" not in names, names
+assert {"ziAbC124", "ziAbC125", "zi12345", "ziAbC1234"} <= names, names
 PY
 for n in Alt-F ffp opt lost+found aquota.user alt-f.log; do
 	check "list of /$n is refused" "$(lcode "$(enc "$M/Disk1/$n")")" 403
@@ -168,6 +174,12 @@ tar -tf "$SANDBOX/priv.tar" > "$SANDBOX/priv.lst" 2>/dev/null
 grep -q 'Disk1/Photos/opt/visible.txt' "$SANDBOX/priv.lst" && ok "downloading a whole disk keeps normal folders" || bad "disk archive missing normal files"
 if grep -qE 'Disk1/(Alt-F|ffp|opt|lost\+found|aquota|alt-f\.log)' "$SANDBOX/priv.lst"; then bad "disk archive contains Alt-F's folders"; else ok "downloading a whole disk leaves Alt-F's folders out"; fi
 curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")"  | grep -q '/Disk1/\(Alt-F\|ffp\|opt\|lost\|aquota\)' && bad "simple page lists private names" || ok "the simple page hides them too"
+
+check "zip leftover: download refused" "$(gcode "$(enc "$M/Disk1/ziAbC123")")" 403
+check "similar name that is not a zip is still there" "$(gcode "$(enc "$M/Disk1/ziAbC124")")" 200
+check "similar name readable by everyone is still there" "$(gcode "$(enc "$M/Disk1/ziAbC125")")" 200
+if grep -qE '/(ziAbC123|ziAbC126)$' "$SANDBOX/priv.lst"; then bad "disk archive contains zip leftovers"; else ok "downloading a whole disk leaves zip leftovers out"; fi
+grep -q 'ziAbC124' "$SANDBOX/priv.lst" && ok "and keeps look-alike files" || bad "look-alike file missing from archive"
 
 echo "== up one folder"
 up() { curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$1")" | grep -o 'href="[^"]*" aria-label="Up one folder"' | head -1; }

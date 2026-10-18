@@ -84,7 +84,7 @@ else
 fi
 
 # nothing can be created under the names Alt-F keeps for itself at the top of a disk
-if test "${FS_REAL%/*}" = "$FS_ROOT" && fs_private "${rel%%/*}"; then
+if test "${FS_REAL%/*}" = "$FS_ROOT" && fs_hidden "$FS_REAL" "${rel%%/*}"; then
 	fail "400 Bad Request" name "That name is used by Alt-F itself and can't be used here."
 fi
 

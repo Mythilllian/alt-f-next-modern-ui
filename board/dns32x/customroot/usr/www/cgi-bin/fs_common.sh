@@ -10,6 +10,8 @@ fs_param() { qparam "$1"; }
 # Folders and files that Alt-F itself keeps in the top folder of a disk. They are hidden
 # from the browser and cannot be opened, downloaded or uploaded into, so nobody can
 # change or delete them by accident from the web page.
+# owner of those zip leftovers; the tests set it to the test user
+FS_JUNK_UID=${FS_JUNK_UID:-0}
 FS_PRIVATE="Alt-F ffp opt lost+found aquota.user aquota.group alt-f.log alt-f.log-previous"
 
 # fs_private <name>: true for one of those names
@@ -18,6 +20,24 @@ fs_private() {
 		Alt-F|ffp|opt|lost+found|aquota.user|aquota.group|alt-f.log|alt-f.log-previous) return 0 ;;
 	esac
 	return 1
+}
+
+# fs_hidden <disk folder> <name>: true when <name> in the top folder of a disk is one of
+# the private names, or a leftover temporary file of the zip program: a file named "zi"
+# plus six letters or digits, owned by root, readable by root only, that starts with the
+# zip signature (PK 03 04). Some zip runs that are interrupted leave these behind, often
+# many gigabytes each. Nothing else matches, so ordinary files are never hidden.
+fs_hidden() {
+	if fs_private "$2"; then return 0; fi
+	case "$2" in
+		zi[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;;
+		*) return 1 ;;
+	esac
+	_hp=$1/$2
+	test -f "$_hp" -a ! -L "$_hp" || return 1
+	set -f; set -- $(ls -ln "$_hp" 2>/dev/null); set +f
+	test "$1" = "-rw-------" -a "$3" = "$FS_JUNK_UID" || return 1
+	test "$(head -c 4 "$_hp" 2>/dev/null | hexdump -ve '/1 "%02X"')" = 504B0304
 }
 
 # fs_resolve <percent-encoded path>: on success sets FS_REAL to the canonical path.
@@ -45,7 +65,8 @@ fs_resolve() {
 			# /mnt/<disk>/<private name>[/...] is off limits
 			_r=${FS_REAL#"$FS_ROOT"/}
 			case "$_r" in
-				*/*) _r=${_r#*/}; if fs_private "${_r%%/*}"; then FS_ERR=outside; return 1; fi ;;
+				*/*) _disk=${_r%%/*}; _r=${_r#*/}
+					if fs_hidden "$FS_ROOT/$_disk" "${_r%%/*}"; then FS_ERR=outside; return 1; fi ;;
 			esac
 			# realpath does not insist that the last part exists
 			if test -e "$FS_REAL"; then return 0; fi
@@ -134,7 +155,7 @@ fs_tsv() {
 		fi
 		_name=${_f##*/}
 		case "$_name" in *[[:cntrl:]]*|lost+found) continue ;; esac
-		if test "$_atroot" = 1 && fs_private "$_name"; then continue; fi
+		if test "$_atroot" = 1 && fs_hidden "$_dir" "$_name"; then continue; fi
 		if test "$_count" -ge "$FS_LIMIT"; then echo "!truncated"; break; fi
 
 		_type=""

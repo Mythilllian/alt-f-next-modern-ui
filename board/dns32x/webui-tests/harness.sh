@@ -12,6 +12,8 @@
 HERE=$(cd "$(dirname "$0")" && pwd)
 WWW_SRC=$HERE/../customroot/usr/www
 SANDBOX=${SANDBOX:-/tmp/altf-webui-test}
+# the CGIs treat zip leftovers owned by this user as the ones to hide (root on a real NAS)
+export FS_JUNK_UID=$(id -u)
 PORT=${PORT:-18080}
 BB=${BB:-$(command -v busybox)}
 

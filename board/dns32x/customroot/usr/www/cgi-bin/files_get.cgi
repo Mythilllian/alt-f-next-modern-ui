@@ -32,6 +32,9 @@ if test -d "$FS_REAL"; then
 	set --
 	if test "${FS_REAL%/*}" = "$FS_ROOT"; then
 		for _p in $FS_PRIVATE; do set -- "$@" --exclude "$name/$_p"; done
+		for _p in "$FS_REAL"/zi??????; do
+			if fs_hidden "$FS_REAL" "${_p##*/}"; then set -- "$@" --exclude "$name/${_p##*/}"; fi
+		done
 	fi
 	cd "${FS_REAL%/*}" && exec tar -cf - "$@" -- "$name" 2>/dev/null
 	exit 0
