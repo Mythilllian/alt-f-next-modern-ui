@@ -1,5 +1,6 @@
 #!/bin/sh
 # Stream one file from /mnt. p=<path>, optional inline=1 to show safe types in the browser.
+# If p is a folder, stream it as a tar archive (symlinks are stored as links, never followed).
 
 source ./common.sh
 source ./fs_common.sh
@@ -18,7 +19,18 @@ if ! fs_resolve "$p"; then
 		*) fail "403 Forbidden" outside ;;
 	esac
 fi
-if test -d "$FS_REAL"; then fail "400 Bad Request" notfile; fi
+if test -d "$FS_REAL"; then
+	if test "$FS_REAL" = "$FS_ROOT"; then fail "400 Bad Request" notfile; fi
+	name=${FS_REAL##*/}
+	ascii=$(printf '%s' "$name" | tr -c 'A-Za-z0-9._ -' '_')
+	utf8=$(printf '%s' "$name" | hexdump -ve '/1 "-%02X"' | tr '-' '%')
+	printf 'Content-Type: application/x-tar\r\n'
+	printf 'Content-Disposition: attachment; filename="%s.tar"; filename*=UTF-8'"''"'%s.tar\r\n' "$ascii" "$utf8"
+	printf 'X-Content-Type-Options: nosniff\r\nCache-Control: private, no-store\r\n\r\n'
+	# no Content-Length: the size is not known before the archive is made
+	cd "${FS_REAL%/*}" && exec tar -cf - -- "$name" 2>/dev/null
+	exit 0
+fi
 if ! test -f "$FS_REAL" -a -r "$FS_REAL"; then fail "404 Not Found" missing; fi
 
 # size is the 5th column of the long listing (no stat -c in this BusyBox)

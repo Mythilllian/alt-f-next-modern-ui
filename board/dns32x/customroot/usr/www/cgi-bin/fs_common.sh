@@ -154,7 +154,7 @@ fs_list() {
 		} else {
 			full = (dir == "/" ? "" : dir) "/" name
 			if (type == "d")
-				printf "<li><div class=\"row\"><div class=\"head\"><a class=\"name\" href=\"/cgi-bin/files.cgi?nojs=1&amp;p=%s\"><span class=\"ico\" aria-hidden=\"true\">&#128193;</span>%s</a></div><span class=\"meta\"></span><span class=\"meta date\">%s</span></div></li>\n", uenc(full), hesc(name), mtime
+				printf "<li><div class=\"row\"><div class=\"head\"><a class=\"name\" href=\"/cgi-bin/files.cgi?nojs=1&amp;p=%s\"><span class=\"ico\" aria-hidden=\"true\">&#128193;</span>%s</a></div><a class=\"meta\" href=\"/cgi-bin/files_get.cgi?p=%s\">Download folder</a><span class=\"meta date\">%s</span></div></li>\n", uenc(full), hesc(name), uenc(full), mtime
 			else
 				printf "<li><div class=\"row\"><div class=\"head\"><a class=\"name\" href=\"/cgi-bin/files_get.cgi?p=%s\"><span class=\"ico\" aria-hidden=\"true\">&#128196;</span>%s</a></div><span class=\"meta\">%.0f bytes</span><span class=\"meta date\">%s</span></div></li>\n", uenc(full), hesc(name), size, mtime
 		}

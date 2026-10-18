@@ -384,6 +384,7 @@ ul.links { list-style: none; margin: 0; padding: 0; }
 ul.links a { display: flex; align-items: center; min-height: var(--tap); }
 
 /* ---- utility ---- */
+.mb { margin-bottom: var(--sp-4); }
 .muted { color: var(--muted); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 pre, code { font-family: var(--mono); font-size: .9em; }

@@ -110,7 +110,7 @@ curl -s -b "$JAR" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/escape/passwd")" |
 curl -s -b "$JAR" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/outside-link")" | grep -q secret && bad "outside-link leaked content" || ok "no outside file content leaked"
 
 echo "== downloads"
-check "folder is not a file" "$(gcode "$(enc "$M/Disk1/Photos")")" 400
+check "a folder is served as an archive, not refused" "$(gcode "$(enc "$M/Disk1/Photos")")" 200
 check "missing file is 404" "$(gcode "$(enc "$M/Disk1/nope.txt")")" 404
 for f in "My Docs/report final.pdf" "it's \"quoted\" & more.txt" "café ☕.txt" "a<b>&amp;.txt" "semi;colon,comma.txt" "Photos/beach.jpg"; do
 	url="$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/$f")"
@@ -131,6 +131,20 @@ grep -qi '^Content-Disposition: attachment' "$SANDBOX/h" && ok "html is never sh
 grep -qi '^Content-Type: application/octet-stream' "$SANDBOX/h" && ok "html is served as a binary download" || bad "html content-type"
 curl -s -b "$JAR" -D "$SANDBOX/h" -o /dev/null "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/Photos/beach.jpg")&inline=1"
 grep -qi '^Content-Disposition: inline' "$SANDBOX/h" && grep -qi '^Content-Type: image/jpeg' "$SANDBOX/h" && ok "jpeg can open inline" || bad "jpeg inline"
+
+echo "== folder download"
+check "root of all disks cannot be downloaded" "$(gcode "$(enc "$M")")" 400
+curl -s -b "$JAR" -D "$SANDBOX/h" -o "$SANDBOX/f.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/My Docs")"
+grep -qi '^Content-Type: application/x-tar' "$SANDBOX/h" && ok "folder comes as a tar archive" || bad "folder content type"
+grep -qi 'filename="My Docs.tar"' "$SANDBOX/h" && ok "archive is named after the folder" || bad "archive name: $(grep -i Content-Disp "$SANDBOX/h")"
+mkdir -p "$SANDBOX/x" && rm -rf "$SANDBOX/x/"* && tar -xf "$SANDBOX/f.tar" -C "$SANDBOX/x" 2>/dev/null
+cmp -s "$SANDBOX/x/My Docs/report final.pdf" "$M/Disk1/My Docs/report final.pdf" && ok "archive holds the exact file" || bad "archive content"
+curl -s -b "$JAR" -o "$SANDBOX/d1.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1")"
+rm -rf "$SANDBOX/x" && mkdir -p "$SANDBOX/x" && tar -xf "$SANDBOX/d1.tar" -C "$SANDBOX/x" 2>/dev/null
+[ -L "$SANDBOX/x/Disk1/escape" ] && ok "a link out of /mnt is stored as a link" || bad "escape link not stored as link"
+if grep -rq "^root:" "$SANDBOX/x" 2>/dev/null; then bad "archive leaked /etc content through a link"; else ok "no content from outside /mnt is in the archive"; fi
+check "archive of a missing folder is 404" "$(gcode "$(enc "$M/Disk1/nope")")" 404
+check "archive of an escaping link is refused" "$(gcode "$(enc "$M/Disk1/escape")")" 403
 
 echo "== simple (no JavaScript) page"
 page=$(curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")")

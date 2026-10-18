@@ -133,7 +133,10 @@
       name.appendChild(el('span', '', e.n));
       name.addEventListener('click', function () { open(full); });
       head.appendChild(name);
-      r.appendChild(el('span', 'meta', ''));
+      var dl = el('a', 'meta', 'Download folder');
+      dl.href = GET + '?p=' + enc(full);
+      dl.setAttribute('aria-label', 'Download the folder ' + e.n);
+      r.appendChild(dl);
     } else {
       name = el('a', 'name');
       name.href = GET + '?p=' + enc(full);
@@ -247,6 +250,11 @@
     current = path;
     box.textContent = '';
     box.appendChild(crumbs(path));
+    if (path !== ROOT) {
+      var all = el('a', 'btn mb', 'Download this folder');
+      all.href = GET + '?p=' + enc(path);
+      box.appendChild(all);
+    }
     var card = el('div', 'card');
     card.appendChild(tools());
     listBox = el('div');

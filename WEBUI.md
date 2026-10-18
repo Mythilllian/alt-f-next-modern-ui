@@ -111,9 +111,9 @@ What is checked:
 
 - Syntax of every script (host `sh -n`, BusyBox `ash -n`) and `shellcheck -s sh` on the new scripts.
 - `test-auth.sh` (56 checks): first-time password, wrong and right password, one-time challenge, cookie flags, return-to-page safety (open redirect, header injection, classic pages coming back inside their frames), the first-time wizard, forged and malformed cookies, two devices at once, idle and absolute timeouts, expiry cleanup, address binding, cross-site POSTs, sign out.
-- `test-files.sh` (92 checks): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
+- `test-files.sh` (100 checks): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
 
-Last run: 56 of 56 and 92 of 92 passed, with BusyBox 1.31.1 built from the NAS configuration. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
+Last run: 56 of 56 and 100 of 100 passed, with BusyBox 1.31.1 built from the NAS configuration. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
 
 What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and a full Buildroot build.
 
@@ -121,6 +121,7 @@ What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and 
 
 - The file browser only shows what is inside `/mnt`. A symlink that points outside `/mnt` is hidden and cannot be opened. Every path goes through `realpath`, must start with `/mnt` before and after resolving, and anything with a control character or NUL is refused.
 - Names come from the shell, not `ls`: this BusyBox has no Unicode support and `ls` prints every non-ASCII byte as `?`. Dot files, `lost+found` and names containing control characters are not listed. Folders show at most 1000 entries (a note appears).
+- Folders download as a `.tar` archive (Download folder on each folder, Download this folder at the top). This image has no `zip` program, and adding one would change the firmware build, so tar it is. Windows 10 (1803 or later) and macOS open `.tar` files; older Windows needs 7-Zip. Links inside a folder are stored as links, never followed, and the archive is streamed without a size, so the browser shows no percentage. The top-level All disks view cannot be downloaded.
 - Downloads have no resume (BusyBox `httpd` has no Range support). HTML, SVG and unknown types always download; only images, PDF, audio, video and plain text can open in the browser.
 - A file swapped for a symlink in the instant between the path check and the read could in theory escape. Only someone who already has write access to the shared disks could try it.
 - `status.cgi` used to be open to anyone on the network. It now needs a login.
@@ -131,7 +132,7 @@ What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and 
 
 **Signing in.** Open the NAS address in your browser. Type the NAS password. Tick "Keep me signed in on this device" on your own computer or phone, and leave it empty on someone else's. You stay signed in for the day, and for up to a week if you ticked the box.
 
-**Finding a file.** Tap **Files**. Tap a folder to open it. Tap a file to download it. Pictures, PDFs and music also have an "Open in browser" link. Use the box at the top to type part of a name, and the menu next to it to put the newest or biggest files first.
+**Finding a file.** Tap **Files**. Tap a folder to open it. Tap a file to download it, or tap Download folder to get a whole folder as one `.tar` file. Pictures, PDFs and music also have an "Open in browser" link. Use the box at the top to type part of a name, and the menu next to it to put the newest or biggest files first.
 
 **Is everything OK?** The Home page says so in the green box at the top. If it turns yellow or red, tap it, read the sentence, and show it to whoever looks after the NAS.
 
