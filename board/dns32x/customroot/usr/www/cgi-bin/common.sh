@@ -514,28 +514,144 @@ js_gotopage() {
 	exit 0
 }
 
-check_cookie() {
-	if test -n "$HTTP_COOKIE" -a -O /tmp/cookie; then
-		ALTFID=$(echo $HTTP_COOKIE | sed -n 's/ALTFID=\([^[:space:],;]*\).*/\1/p')
-        if test -n "$ALTFID"; then
-			if test $(expr $(date +%s) - $(date +%s -r /tmp/cookie) ) -lt 1800; then
-				if test "$(cat /tmp/cookie)" = "${ALTFID}"; then
-					touch /tmp/cookie
-					return
-				else
-					logger -t httpd "Unautorized access attempted with cookie \"${ALTFID}\""
-				fi
-			fi
-		fi
-		rm /tmp/cookie
+# ------------------------------------------------------------------
+# Login sessions.
+# After a good login, login_proc.cgi calls sess_new, which stores a random
+# token in $SESS_DIR (tmpfs). The browser gets it in the ALTSID cookie.
+# Every protected page calls check_cookie, the single place that validates it.
+# Session file content: "<created> <last-seen> <client-ip> <keep>"
+# Settings live in /etc/web-session.conf (see that file).
+# ------------------------------------------------------------------
+SESS_DIR=/tmp/sessions
+
+sess_conf() {
+	SESSION_IDLE=28800
+	SESSION_ABS=604800
+	SESSION_BIND_IP=yes
+	if test -r /etc/web-session.conf; then . /etc/web-session.conf; fi
+}
+
+# sess_token: set SESS_TOKEN from the ALTSID cookie (empty if absent or malformed)
+sess_token() {
+	SESS_TOKEN=""
+	_oifs=$IFS; IFS=';'; set -f
+	for _kv in $HTTP_COOKIE; do
+		_kv=${_kv#"${_kv%%[! ]*}"}
+		case "$_kv" in ALTSID=*) SESS_TOKEN=${_kv#ALTSID=} ;; esac
+	done
+	IFS=$_oifs; set +f
+	case "$SESS_TOKEN" in *[!0-9a-f]*) SESS_TOKEN="" ;; esac
+	if test "${#SESS_TOKEN}" -ne 64; then SESS_TOKEN=""; fi
+}
+
+# sess_rand <bytes>: random hex string from /dev/urandom
+sess_rand() {
+	dd if=/dev/urandom bs="$1" count=1 2>/dev/null | hexdump -ve '/1 "%02x"'
+}
+
+# sess_cleanup: drop expired sessions and stale login challenges. No cron needed,
+# it runs on every login.
+sess_cleanup() {
+	sess_conf
+	_now=$(date +%s)
+	for _f in "$SESS_DIR"/*; do
+		if ! test -f "$_f"; then continue; fi
+		_c=""; _l=""
+		read -r _c _l _rest < "$_f"
+		case "${_f##*/}" in
+			salt.*) if test $((_now - ${_c:-0})) -gt 600; then rm -f "$_f"; fi ;;
+			*)
+				if test $((_now - ${_l:-0})) -gt "$SESSION_IDLE" -o $((_now - ${_c:-0})) -gt "$SESSION_ABS"; then
+					rm -f "$_f"
+				fi ;;
+		esac
+	done
+}
+
+# sess_new <yes|no>: create a session for the current client, sets SESS_TOKEN
+sess_new() {
+	sess_conf
+	mkdir -p "$SESS_DIR"; chmod 700 "$SESS_DIR"
+	sess_cleanup
+	SESS_TOKEN=$(sess_rand 32)
+	_now=$(date +%s)
+	( umask 077; echo "$_now $_now ${REMOTE_ADDR:--} $1" > "$SESS_DIR/$SESS_TOKEN" )
+}
+
+# sess_cookie <yes|no> [secure]: print the Set-Cookie header for SESS_TOKEN
+sess_cookie() {
+	_ck="ALTSID=$SESS_TOKEN; Path=/; HttpOnly; SameSite=Strict"
+	if test "$1" = yes; then _ck="$_ck; Max-Age=$SESSION_ABS"; fi
+	if test -n "$2"; then _ck="$_ck; Secure"; fi
+	printf 'Set-Cookie: %s\r\n' "$_ck"
+}
+
+# sess_end: delete the session of the current request and print an expiring cookie
+sess_end() {
+	sess_token
+	if test -n "$SESS_TOKEN"; then rm -f "$SESS_DIR/$SESS_TOKEN"; fi
+	printf 'Set-Cookie: ALTSID=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0\r\n'
+}
+
+# sess_valid: true if the request carries a live session. Slides the idle timeout.
+sess_valid() {
+	sess_conf
+	sess_token
+	if test -z "$SESS_TOKEN" -o ! -f "$SESS_DIR/$SESS_TOKEN"; then return 1; fi
+	read -r _c _l _ip _keep < "$SESS_DIR/$SESS_TOKEN" || return 1
+	_now=$(date +%s)
+	if test $((_now - ${_l:-0})) -gt "$SESSION_IDLE" -o $((_now - ${_c:-0})) -gt "$SESSION_ABS"; then
+		rm -f "$SESS_DIR/$SESS_TOKEN"
+		return 1
 	fi
-	html_header
-	cat<<-EOF
-		<script type="text/javascript">
-			parent.frames.content.location.assign("/cgi-bin/login.cgi?$REQUEST_URI")
-			parent.frames.nav.location.assign("/cgi-bin/index.cgi")
-		</script></body></html>
-	EOF
+	if test "$SESSION_BIND_IP" = yes -a "$_ip" != "-" -a -n "$REMOTE_ADDR" -a "$_ip" != "$REMOTE_ADDR"; then
+		logger -t httpd "Session used from a different address ($REMOTE_ADDR, not $_ip)"
+		return 1
+	fi
+	# the file already exists with mode 600, so a plain redirect keeps it private
+	echo "$_c $_now $_ip $_keep" > "$SESS_DIR/$SESS_TOKEN"
+	return 0
+}
+
+# csrf_ok: state-changing (POST) requests must come from this very site.
+# Browsers always send Origin or Referer on a cross-site POST, so require one of them
+# and require its host to match the Host header.
+csrf_ok() {
+	if test "$REQUEST_METHOD" != POST; then return 0; fi
+	_o=$HTTP_ORIGIN
+	if test "$_o" = null; then _o=""; fi
+	if test -z "$_o"; then _o=$HTTP_REFERER; fi
+	if test -z "$_o"; then return 1; fi
+	_h=${_o#*://}; _h=${_h%%/*}
+	test "$_h" = "$HTTP_HOST"
+}
+
+# check_cookie [api]: call at the top of every protected page. Lets valid sessions through;
+# otherwise answers 401 to background requests (or whenever "api" is given) and sends
+# people to the login page.
+check_cookie() {
+	if sess_valid; then
+		if csrf_ok; then return 0; fi
+		logger -t httpd "Rejected a form post from another site (${HTTP_ORIGIN:-$HTTP_REFERER})"
+		printf 'Status: 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nThis request did not come from the Alt-F pages.\n'
+		exit 0
+	fi
+
+	if test -n "$HTTP_X_REQUESTED_WITH" -o "$1" = api; then
+		printf 'Status: 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nPlease sign in again.\n'
+		exit 0
+	fi
+
+	_to=/cgi-bin/login.cgi
+	if test "$REQUEST_METHOD" != POST -a -n "$REQUEST_URI"; then
+		case "${REQUEST_URI%%\?*}" in
+			/cgi-bin/home.cgi|/cgi-bin/shares.cgi|/cgi-bin/advanced.cgi|/cgi-bin/confirm.cgi|/cgi-bin/files.cgi|/cgi-bin/status.cgi|/cgi-bin/classic.cgi)
+				_to="$_to?$REQUEST_URI" ;;
+			*)	# a classic page: after signing in, bring it back inside its frames
+				_to="$_to?/cgi-bin/classic.cgi?p=$(qencode "$REQUEST_URI")" ;;
+		esac
+	fi
+	printf 'HTTP/1.1 303\r\nContent-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\nLocation: %s\r\n\r\n' "$_to"
 	exit 0
 }
 
@@ -760,4 +876,246 @@ cat<<-EOF
 	}()
 	</script>
 EOF
+}
+
+# ------------------------------------------------------------------
+# Shared page shell for the new web UI (alt-f.css / alt-f.js).
+# Old pages keep using write_header; new pages call page_start/page_end.
+# ------------------------------------------------------------------
+
+# esc <text>: print text safe for HTML body and attribute values.
+# Only forks sed when the text really contains a special character.
+esc() {
+	case "$1" in
+		*[\&\<\>\"\']*)
+			printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
+				-e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
+
+# hsize <bytes>: human readable size
+hsize() {
+	awk -v b="${1:-0}" 'BEGIN {
+		split("B KB MB GB TB PB", u, " "); i = 1
+		while (b >= 1024 && i < 6) { b /= 1024; i++ }
+		if (i == 1) printf "%d %s", b, u[i]; else printf "%.1f %s", b, u[i]
+	}'
+}
+
+# ui_meter <percent> <label> [warn-at] [bad-at]: usage bar, colored by level
+ui_meter() {
+	_p=${1:-0}
+	case "$_p" in ''|*[!0-9]*) _p=0 ;; esac
+	if test "$_p" -gt 100; then _p=100; fi
+	_c=""
+	if test "$_p" -ge "${4:-90}"; then _c=" bad"
+	elif test "$_p" -ge "${3:-80}"; then _c=" warn"; fi
+	printf '<div class="meter%s" role="img" aria-label="%s"><i class="w%d"></i></div><span class="mt">%s</span>\n' \
+		"$_c" "$(esc "$2")" "$_p" "$(esc "$2")"
+}
+
+# page_start <title> [section]: HTTP header, <head>, top bar and navigation.
+# section is one of home files shares status advanced; it marks the current link.
+# section "login" prints a bare page with no navigation (used before signing in).
+page_start() {
+	HTML_HEADER_DONE="yes"
+	_sec="$2"
+	# The first-time wizard is made of classic pages, which need their frames. When a
+	# new page is opened on its own while the wizard is running, continue the wizard
+	# inside the classic frames. Elsewhere the classic rules apply (firstboot).
+	if test -f /tmp/firstboot -a "$_sec" != login -a "$HTTP_SEC_FETCH_DEST" = document; then
+		_fb=$(cat /tmp/firstboot)
+		_fb=${_fb%_?}
+		if test "$_fb" != "$(basename "${0%.cgi}")" -a -f "./$_fb.cgi"; then
+			gotopage "$(classic_url "$_fb.cgi")"
+		fi
+	fi
+	firstboot
+	if test -s "$CONF_MISC"; then . "$CONF_MISC"; fi
+
+	printf 'Content-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\n\r\n'
+	cat<<-EOF
+		<!DOCTYPE html>
+		<html lang="en"><head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="color-scheme" content="light dark">
+		<title>$(esc "$1") - Alt-F</title>
+		<base target="_top">
+		<link rel="icon" type="image/png" href="/dns-323.png">
+		<link rel="stylesheet" href="/alt-f.css">
+		<script>try{var t=localStorage.getItem('altf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+		$(if test "$_sec" = login; then echo '<script>if(window.top!==window.self){window.top.location.href=window.location.href}</script>'; fi)
+		</head><body>
+		<a class="skip" href="#main">Skip to content</a>
+	EOF
+	if test "$_sec" != login; then
+		cat<<-EOF
+			<header class="topbar"><div class="topbar-in">
+			<a class="brand" href="/cgi-bin/home.cgi">Alt-F</a>
+			<button type="button" class="navtoggle" id="navtoggle" aria-expanded="false" aria-controls="nav">Menu</button>
+			<nav class="nav" id="nav" aria-label="Main">
+		EOF
+		for _i in "home|Home|home.cgi" "files|Files|files.cgi" "shares|Shared folders|shares.cgi" \
+				"status|Health|status.cgi" "advanced|Advanced|advanced.cgi"; do
+			_k=${_i%%|*}; _r=${_i#*|}; _l=${_r%%|*}; _u=${_r#*|}
+			if test "$_k" = "$_sec"; then _cur=' aria-current="page"'; else _cur=""; fi
+			echo "<a href=\"/cgi-bin/$_u\"$_cur>$_l</a>"
+		done
+		cat<<-EOF
+			<form method="post" action="/cgi-bin/logout.cgi"><button type="submit">Sign out</button></form>
+			</nav></div></header>
+		EOF
+	fi
+	echo '<main id="main">'
+	if test -n "$firstmsg"; then echo "<div class=\"banner warn\">$firstmsg</div>"; fi
+	case "$_sec" in advanced)
+		if ! loadsave_settings -st >/dev/null 2>&1; then
+			echo '<div class="banner warn">You have changed some settings that are not saved yet. They will be lost when the NAS restarts. <a href="/cgi-bin/settings.cgi">Save them now</a>.</div>'
+		fi ;;
+	esac
+}
+
+# page_end: footer, theme switch and script
+page_end() {
+	_ver=""
+	read -r _ver < /etc/Alt-F 2>/dev/null
+	cat<<-EOF
+		</main>
+		<footer class="foot">
+		<span>Alt-F $(esc "$_ver")</span>
+		$(if test "$_sec" != login; then echo '<a href="/cgi-bin/classic.cgi">Classic Alt-F pages</a>'; fi)
+		<label class="theme" for="theme-select"><span>Appearance</span>
+		<select id="theme-select"><option value="auto">Automatic</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+		</footer>
+		<script src="/alt-f.js"></script>
+		</body></html>
+	EOF
+}
+
+# page_error <plain-language message> [technical detail]: friendly error page.
+# The technical detail is kept in a collapsed box for the administrator.
+page_error() {
+	page_start "Something went wrong" "${3:-}"
+	echo "<div class=\"card\"><h1>Something went wrong</h1><p>$(esc "$1")</p>"
+	if test -n "$2"; then
+		echo "<details><summary>Technical details</summary><pre>$(esc "$2")</pre></details>"
+	fi
+	echo '<div class="actions"><a class="btn primary" href="/cgi-bin/home.cgi">Back to Home</a></div></div>'
+	page_end
+	exit 0
+}
+
+# storage_info: sets ST_PCT (overall use) and ST_MAXPCT (fullest disk), plus ST_USED_H and
+# ST_TOTAL_H as ready-to-print sizes ("1.2 TB"). ST_TOTAL_H stays empty without disks.
+# Sizes are formatted in awk: this BusyBox does shell arithmetic in 32 bits, which
+# overflows on multi-terabyte disks.
+storage_info() {
+	eval $(df -k 2>/dev/null | awk '
+		function hs(kb,   u, i, b) {
+			split("KB MB GB TB PB", u, " "); i = 1; b = kb
+			while (b >= 1024 && i < 5) { b /= 1024; i++ }
+			return sprintf("%.1f %s", b, u[i])
+		}
+		$1 ~ /^\/dev\/(sd|md|dm-)/ && !seen[$1]++ { t += $2; u += $3; p = $5 + 0; if (p > m) m = p }
+		END { printf "ST_USED_H=\"%s\"; ST_TOTAL_H=\"%s\"; ST_MAXPCT=%d; ST_PCT=%d",
+			(t ? hs(u) : ""), (t ? hs(t) : ""), m, (t ? u * 100 / t : 0) }')
+	ST_PCT=${ST_PCT:-0}; ST_MAXPCT=${ST_MAXPCT:-0}
+}
+
+# health_check: cheap checks from /proc and /sys only (does not wake sleeping disks).
+# Sets HEALTH_LEVEL (ok, warn or bad) and HEALTH_MSGS (one plain sentence per line).
+health_check() {
+	HEALTH_LEVEL=ok; HEALTH_MSGS=""
+	ST_USED_H=""; ST_TOTAL_H=""; ST_PCT=0; ST_MAXPCT=0
+	_hc_add() {
+		HEALTH_MSGS="${HEALTH_MSGS}${HEALTH_MSGS:+
+}$2"
+		if test "$1" = bad -o "$HEALTH_LEVEL" = ok; then HEALTH_LEVEL=$1; fi
+	}
+
+	_nd=0
+	for _d in /dev/sd?; do if test -b "$_d"; then _nd=$((_nd + 1)); fi; done
+	if test "$_nd" -eq 0; then
+		_hc_add warn "No disks found. Plug in a drive and refresh."
+	else
+		storage_info
+		if test "$ST_MAXPCT" -ge 95; then
+			_hc_add bad "A disk is almost full. Delete files you no longer need, or add a bigger disk."
+		elif test "$ST_MAXPCT" -ge 85; then
+			_hc_add warn "A disk is getting full ($ST_MAXPCT% used)."
+		fi
+		if awk '$1 ~ /^\/dev\/(sd|md|dm-)/ { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == "ro") f = 1 }
+				END { exit !f }' /proc/mounts; then
+			_hc_add bad "A disk can only be read right now, not written to. It may need a check. Ask whoever looks after the NAS."
+		fi
+	fi
+
+	for _m in /sys/block/md[0-9]*/md/degraded; do
+		if test -f "$_m"; then
+			read -r _dg < "$_m"
+			if test "${_dg:-0}" != 0; then
+				_hc_add bad "One disk in your mirrored pair has a problem. Your files are still there, but they are no longer duplicated."
+			fi
+		fi
+	done
+
+	if test -r /tmp/sys/temp1_input; then
+		read -r _tmp < /tmp/sys/temp1_input
+		_crit=54
+		if test -f /etc/sysctrl.conf; then . /etc/sysctrl.conf; _crit=${crit_temp:-54}; fi
+		if test $((${_tmp:-0} / 1000)) -ge "$_crit"; then
+			_hc_add bad "The NAS is running hot. Make sure the vents are not blocked."
+		fi
+	fi
+
+	if test -s /var/log/systemerror.log; then
+		_hc_add warn "The NAS has recorded a warning. Open Health for details."
+	fi
+}
+
+# qparam <name>: print the still percent-encoded value of one query-string field.
+# Reads only the field asked for, so nothing a visitor sends is ever evaluated.
+qparam() {
+	_oifs=$IFS; IFS='&'; set -f
+	for _kv in $QUERY_STRING; do
+		case "$_kv" in "$1="*) printf '%s' "${_kv#*=}"; break ;; esac
+	done
+	IFS=$_oifs; set +f
+}
+
+# risk_of <page>: which kind of care a settings page needs (empty if none).
+# Used by the Advanced page and by confirm.cgi, so both always agree.
+risk_of() {
+	case "${1%%\?*}" in
+		diskwiz.cgi|diskpart.cgi|diskmaint.cgi|raid.cgi|lvm.cgi|cryptsetup.cgi) echo disk ;;
+		host.cgi|dnsmasq.cgi|hosts.cgi) echo network ;;
+		firmware.cgi) echo firmware ;;
+		settings.cgi) echo settings ;;
+	esac
+}
+
+# classic_url <page>: address of a classic Alt-F page shown inside the classic frames
+classic_url() {
+	echo "/cgi-bin/classic.cgi?p=/cgi-bin/$(qencode "$1")"
+}
+
+# qencode <text>: escape the few characters that would break a query-string value
+qencode() {
+	printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/?/%3F/g' -e 's/&/%26/g' -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/#/%23/g' -e 's/ /%20/g'
+}
+
+# shares_tsv: "name<TAB>path" for each Samba shared folder
+shares_tsv() {
+	awk '
+	function flush() {
+		l = tolower(name)
+		if (name != "" && path != "" && l != "global" && l != "printers" && l != "homes" && l != "print$")
+			print name "\t" path
+	}
+	/^[ \t]*[#;]/ { next }
+	/^[ \t]*\[/ { flush(); name = $0; sub(/^[ \t]*\[/, "", name); sub(/\].*$/, "", name); path = ""; next }
+	/^[ \t]*path[ \t]*=/ { path = $0; sub(/^[^=]*=[ \t]*/, "", path); sub(/[ \t\r]*$/, "", path) }
+	END { flush() }' /etc/samba/smb.conf 2>/dev/null
 }

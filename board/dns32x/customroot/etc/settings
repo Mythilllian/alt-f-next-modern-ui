@@ -43,5 +43,6 @@
 /etc/vsftpd.conf
 /etc/vsftpd.user_list
 /etc/web-secret
+/etc/web-session.conf
 /etc/wgetrc
 /usr/www/cgi-bin/Shortcuts.men

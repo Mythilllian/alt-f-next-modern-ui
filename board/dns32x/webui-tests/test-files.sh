@@ -1,0 +1,230 @@
+#!/bin/sh
+# Path-traversal, filename and download tests for the file browser, run against the
+# local BusyBox httpd harness (see harness.sh).
+#
+#   BB=/path/to/busybox sh board/dns32x/webui-tests/test-files.sh
+#
+# Needs curl and python3 on the PC (python is only used to check the JSON).
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+export SANDBOX=${SANDBOX:-/tmp/altf-webui-test}
+export PORT=${PORT:-18082}
+H=http://127.0.0.1:$PORT
+PASS=0; FAIL=0
+
+sh "$HERE/harness.sh" stop >/dev/null 2>&1
+sh "$HERE/harness.sh" start >/dev/null || exit 1
+trap 'sh "$HERE/harness.sh" stop' EXIT
+
+M=$SANDBOX/mnt
+LOCKDIR=/tmp/fs-size.lock
+echo -n secretpw > "$SANDBOX/etc/web-secret"
+
+ok()   { PASS=$((PASS + 1)); echo "ok   $1"; }
+bad()  { FAIL=$((FAIL + 1)); echo "FAIL $1"; }
+check() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', want '$3')"; fi; }
+
+# ---- sample tree ----
+mkdir -p "$M/Disk1/Photos" "$M/Disk1/My Docs" "$M/Disk1/empty" "$M/Disk1/big"
+echo "holiday" > "$M/Disk1/Photos/beach.jpg"
+echo "pdfdata" > "$M/Disk1/My Docs/report final.pdf"
+echo "q" > "$M/Disk1/it's \"quoted\" & more.txt"
+echo "u" > "$M/Disk1/café ☕.txt"
+echo "t" > "$M/Disk1/a<b>&amp;.txt"
+echo "<script>alert(1)</script>" > "$M/Disk1/page.html"
+echo "semi;colon" > "$M/Disk1/semi;colon,comma.txt"
+echo "secret" > "$SANDBOX/outside.txt"
+ln -sfn /etc "$M/Disk1/escape"
+ln -sfn /etc/passwd "$M/Disk1/passwd-link"
+ln -sfn "$SANDBOX/outside.txt" "$M/Disk1/outside-link"
+ln -sfn "$M/Disk1/Photos" "$M/Disk1/inside-link"
+mkdir -p "$M/../mnt-evil" && echo evil > "$M/../mnt-evil/x.txt"
+i=0; while [ $i -lt 2100 ]; do : > "$M/Disk1/big/f$i"; i=$((i + 1)); done
+
+# ---- sign in ----
+salt=$(curl -s "$H/cgi-bin/login.cgi" | grep -o '[0-9a-f]\{32\}' | head -1)
+hash=$(printf 'secretpw%s' "$salt" | md5sum | cut -d' ' -f1)
+JAR=$SANDBOX/jar
+curl -s -c "$JAR" -o /dev/null -d "salt=$salt&pwhash=$hash" "$H/cgi-bin/login_proc.cgi"
+
+enc() { python3 -c 'import sys,urllib.parse as u; print(u.quote(sys.argv[1], safe=""))' "$1"; }
+# prints the status code, or NOCGI when the answer did not come from our script
+# (a 404 from httpd itself must never count as "refused")
+code() {
+	_c=$(curl -s -o /dev/null -D "$SANDBOX/hh" -w '%{http_code}' -b "$JAR" "$@")
+	if grep -qi '^Cache-Control: .*no-store' "$SANDBOX/hh"; then echo "$_c"; else echo "NOCGI$_c"; fi
+}
+list() { curl -s -b "$JAR" "$H/cgi-bin/files_list.cgi?p=$1"; }
+lcode() { code "$H/cgi-bin/files_list.cgi?p=$1"; }
+gcode() { code "$H/cgi-bin/files_get.cgi?p=$1"; }
+
+echo "== authentication"
+check "list without session is 401" "$(curl -s -o /dev/null -w '%{http_code}' "$H/cgi-bin/files_list.cgi?p=$(enc "$M")")" 401
+check "download without session is 401" "$(curl -s -o /dev/null -w '%{http_code}' "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/page.html")")" 401
+check "list with a forged cookie is 401" "$(curl -s -o /dev/null -w '%{http_code}' -b "ALTSID=$(printf '%064d' 7)" "$H/cgi-bin/files_list.cgi?p=$(enc "$M")")" 401
+
+echo "== listing"
+check "root list is 200" "$(lcode "$(enc "$M")")" 200
+list "$(enc "$M")" | grep -q '"n":"Disk1"' && ok "root shows Disk1" || bad "root shows Disk1"
+list "$(enc "$M/Disk1")" > "$SANDBOX/l.json"
+python3 - "$SANDBOX/l.json" <<'PY' && ok "Disk1 JSON is valid and names are exact" || bad "Disk1 JSON names"
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+names = {e["n"] for e in d["entries"]}
+want = {"it's \"quoted\" & more.txt", "café ☕.txt", "a<b>&amp;.txt", "semi;colon,comma.txt", "My Docs", "Photos", "page.html"}
+missing = want - names
+assert not missing, missing
+assert all(set(e) == {"n", "t", "s", "m"} for e in d["entries"])
+PY
+check "folders are typed d" "$(python3 -c "import json;d=json.load(open('$SANDBOX/l.json'));print([e['t'] for e in d['entries'] if e['n']=='Photos'][0])")" d
+list "$(enc "$M/Disk1/empty")" | grep -q '"entries":\[\]' && ok "empty folder lists no entries" || bad "empty folder"
+list "$(enc "$M/Disk1/big")" > "$SANDBOX/big.json"
+check "big folder is cut at 1000" "$(python3 -c "import json;d=json.load(open('$SANDBOX/big.json'));print(len(d['entries']),d['truncated'])")" "1000 True"
+check "a folder that does not exist is 404, not 400" "$(lcode "$(enc "$M/Disk1/no-such-folder")")" 404
+check "symlink inside /mnt is followed" "$(lcode "$(enc "$M/Disk1/inside-link")")" 200
+python3 - "$SANDBOX/l.json" <<'PY' && ok "links that leave /mnt are not listed, links inside are" || bad "symlink listing"
+import json, sys
+names = {e["n"] for e in json.load(open(sys.argv[1], encoding="utf-8"))["entries"]}
+assert "inside-link" in names, names
+assert not names & {"escape", "passwd-link", "outside-link"}, names
+PY
+
+echo "== traversal and escapes are refused"
+for p in \
+	"$M/../" "$M/../etc" "$M/Disk1/../../etc" "/etc" "/etc/passwd" "/" "$M-evil" "${M}x" "${M}/../mnt-evil" \
+	"$M/Disk1/escape" "$M/Disk1/escape/passwd" "$M/Disk1/passwd-link" "$M/Disk1/outside-link" \
+	"relative/path" "mnt" "$M//../etc" ; do
+	c=$(lcode "$(enc "$p")")
+	case "$c" in 403|404) ok "list '$p' -> $c" ;; *) bad "list '$p' -> $c" ;; esac
+	c=$(gcode "$(enc "$p")")
+	case "$c" in 400|403|404) ok "get  '$p' -> $c" ;; *) bad "get  '$p' -> $c" ;; esac
+done
+# raw (not pre-encoded) tricks sent straight on the wire
+for raw in \
+	"$(enc "$M")/%2e%2e/%2e%2e/etc" "$(enc "$M")%2f%2e%2e%2f%2e%2e%2fetc" "$(enc "$M")%252f..%252f..%252fetc" \
+	"%2e%2e%2f%2e%2e%2fetc%2fpasswd" "$(enc "$M")%00" "$(enc "$M")%00/../../etc" "$(enc "$M/Disk1")%0a" \
+	"$(enc "$M/Disk1")%0d%0aX-Evil:1" "$(enc "$M/Disk1")%01" ; do
+	c=$(lcode "$raw"); case "$c" in 400|403|404) ok "list raw '$raw' -> $c" ;; *) bad "list raw '$raw' -> $c" ;; esac
+	c=$(gcode "$raw"); case "$c" in 400|403|404) ok "get  raw '$raw' -> $c" ;; *) bad "get  raw '$raw' -> $c" ;; esac
+done
+curl -s -b "$JAR" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/escape/passwd")" | grep -q root && bad "escape/passwd leaked file content" || ok "no /etc/passwd content leaked"
+curl -s -b "$JAR" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/outside-link")" | grep -q secret && bad "outside-link leaked content" || ok "no outside file content leaked"
+
+echo "== downloads"
+check "a folder is served as an archive, not refused" "$(gcode "$(enc "$M/Disk1/Photos")")" 200
+check "missing file is 404" "$(gcode "$(enc "$M/Disk1/nope.txt")")" 404
+for f in "My Docs/report final.pdf" "it's \"quoted\" & more.txt" "café ☕.txt" "a<b>&amp;.txt" "semi;colon,comma.txt" "Photos/beach.jpg"; do
+	url="$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/$f")"
+	curl -s -b "$JAR" -D "$SANDBOX/h" -o "$SANDBOX/body" "$url"
+	cmp -s "$SANDBOX/body" "$M/Disk1/$f" && ok "bytes match: $f" || bad "bytes differ: $f"
+	want=$(wc -c < "$M/Disk1/$f" | tr -d ' ')
+	got=$(tr -d '\r' < "$SANDBOX/h" | sed -n 's/^[Cc]ontent-[Ll]ength: //p')
+	check "Content-Length: $f" "$got" "$want"
+	grep -qi '^Content-Disposition: attachment; filename="[^"]*"; filename\*=UTF-8' "$SANDBOX/h" && ok "attachment header: $f" || bad "attachment header: $f"
+done
+curl -s -b "$JAR" -D "$SANDBOX/h" -o /dev/null "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/café ☕.txt")"
+star=$(tr -d '\r' < "$SANDBOX/h" | sed -n "s/^Content-Disposition:.*filename\*=UTF-8''//p")
+check "unicode name round-trips through filename*" "$(python3 -c 'import sys,urllib.parse as u; print(u.unquote(sys.argv[1]))' "$star")" "café ☕.txt"
+curl -s -b "$JAR" -D "$SANDBOX/h" -o /dev/null "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/it's \"quoted\" & more.txt")"
+grep -i '^Content-Disposition' "$SANDBOX/h" | tr -d '\r' | grep -q 'filename="it_s _quoted_ _ more.txt"' && ok "quotes and & cleaned in ascii filename" || { bad "ascii filename"; grep -i Content-Disp "$SANDBOX/h"; }
+curl -s -b "$JAR" -D "$SANDBOX/h" -o /dev/null "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/page.html")&inline=1"
+grep -qi '^Content-Disposition: attachment' "$SANDBOX/h" && ok "html is never shown inline" || bad "html shown inline"
+grep -qi '^Content-Type: application/octet-stream' "$SANDBOX/h" && ok "html is served as a binary download" || bad "html content-type"
+curl -s -b "$JAR" -D "$SANDBOX/h" -o /dev/null "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/Photos/beach.jpg")&inline=1"
+grep -qi '^Content-Disposition: inline' "$SANDBOX/h" && grep -qi '^Content-Type: image/jpeg' "$SANDBOX/h" && ok "jpeg can open inline" || bad "jpeg inline"
+
+echo "== folder download"
+check "root of all disks cannot be downloaded" "$(gcode "$(enc "$M")")" 400
+curl -s -b "$JAR" -D "$SANDBOX/h" -o "$SANDBOX/f.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1/My Docs")"
+grep -qi '^Content-Type: application/x-tar' "$SANDBOX/h" && ok "folder comes as a tar archive" || bad "folder content type"
+grep -qi 'filename="My Docs.tar"' "$SANDBOX/h" && ok "archive is named after the folder" || bad "archive name: $(grep -i Content-Disp "$SANDBOX/h")"
+mkdir -p "$SANDBOX/x" && rm -rf "$SANDBOX/x/"* && tar -xf "$SANDBOX/f.tar" -C "$SANDBOX/x" 2>/dev/null
+cmp -s "$SANDBOX/x/My Docs/report final.pdf" "$M/Disk1/My Docs/report final.pdf" && ok "archive holds the exact file" || bad "archive content"
+curl -s -b "$JAR" -o "$SANDBOX/d1.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1")"
+rm -rf "$SANDBOX/x" && mkdir -p "$SANDBOX/x" && tar -xf "$SANDBOX/d1.tar" -C "$SANDBOX/x" 2>/dev/null
+[ -L "$SANDBOX/x/Disk1/escape" ] && ok "a link out of /mnt is stored as a link" || bad "escape link not stored as link"
+if grep -rq "^root:" "$SANDBOX/x" 2>/dev/null; then bad "archive leaked /etc content through a link"; else ok "no content from outside /mnt is in the archive"; fi
+check "archive of a missing folder is 404" "$(gcode "$(enc "$M/Disk1/nope")")" 404
+check "archive of an escaping link is refused" "$(gcode "$(enc "$M/Disk1/escape")")" 403
+
+echo "== Alt-F's own folders are hidden and protected"
+for n in Alt-F ffp opt lost+found aquota.user aquota.group alt-f.log alt-f.log-previous; do mkdir -p "$M/Disk1/$n/inner"; echo secret > "$M/Disk1/$n/inner/file.txt"; done
+for n in ziAbC123 ziAbC124 ziAbC125 zi12345 ziAbC1234 ziAbC126; do printf 'PK\003\004rest of zip' > "$M/Disk1/$n"; chmod 600 "$M/Disk1/$n"; done
+echo "plain text" > "$M/Disk1/ziAbC124"; chmod 600 "$M/Disk1/ziAbC124"
+chmod 644 "$M/Disk1/ziAbC125"
+ln -s ziAbC123 "$M/Disk1/ziAbC127"
+mkdir -p "$M/Disk1/Photos/opt" && echo ok > "$M/Disk1/Photos/opt/visible.txt"
+list "$(enc "$M/Disk1")" > "$SANDBOX/priv.json"
+python3 - "$SANDBOX/priv.json" <<'PY' && ok "none of Alt-F's names are listed at the top of a disk" || bad "private names listed"
+import json, sys
+names = {e["n"] for e in json.load(open(sys.argv[1], encoding="utf-8"))["entries"]}
+assert not names & {"Alt-F", "ffp", "opt", "lost+found", "aquota.user", "aquota.group", "alt-f.log", "alt-f.log-previous"}, names
+assert {"Photos", "My Docs"} <= names, names
+assert "ziAbC123" not in names and "ziAbC126" not in names, names
+assert {"ziAbC124", "ziAbC125", "zi12345", "ziAbC1234"} <= names, names
+PY
+for n in Alt-F ffp opt lost+found aquota.user alt-f.log; do
+	check "list of /$n is refused" "$(lcode "$(enc "$M/Disk1/$n")")" 403
+	check "list inside /$n is refused" "$(lcode "$(enc "$M/Disk1/$n/inner")")" 403
+	check "download from /$n is refused" "$(gcode "$(enc "$M/Disk1/$n/inner/file.txt")")" 403
+done
+check "a folder called opt deeper down is still shown" "$(lcode "$(enc "$M/Disk1/Photos/opt")")" 200
+check "and its files can be downloaded" "$(gcode "$(enc "$M/Disk1/Photos/opt/visible.txt")")" 200
+curl -s -b "$JAR" -o "$SANDBOX/priv.tar" "$H/cgi-bin/files_get.cgi?p=$(enc "$M/Disk1")"
+tar -tf "$SANDBOX/priv.tar" > "$SANDBOX/priv.lst" 2>/dev/null
+grep -q 'Disk1/Photos/opt/visible.txt' "$SANDBOX/priv.lst" && ok "downloading a whole disk keeps normal folders" || bad "disk archive missing normal files"
+if grep -qE 'Disk1/(Alt-F|ffp|opt|lost\+found|aquota|alt-f\.log)' "$SANDBOX/priv.lst"; then bad "disk archive contains Alt-F's folders"; else ok "downloading a whole disk leaves Alt-F's folders out"; fi
+curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")"  | grep -q '/Disk1/\(Alt-F\|ffp\|opt\|lost\|aquota\)' && bad "simple page lists private names" || ok "the simple page hides them too"
+
+check "zip leftover: download refused" "$(gcode "$(enc "$M/Disk1/ziAbC123")")" 403
+check "similar name that is not a zip is still there" "$(gcode "$(enc "$M/Disk1/ziAbC124")")" 200
+check "similar name readable by everyone is still there" "$(gcode "$(enc "$M/Disk1/ziAbC125")")" 200
+if grep -qE '/(ziAbC123|ziAbC126)$' "$SANDBOX/priv.lst"; then bad "disk archive contains zip leftovers"; else ok "downloading a whole disk leaves zip leftovers out"; fi
+grep -q 'ziAbC124' "$SANDBOX/priv.lst" && ok "and keeps look-alike files" || bad "look-alike file missing from archive"
+
+echo "== folder sizes"
+size() { curl -s -b "$JAR" "$H/cgi-bin/files_size.cgi?p=$1"; }
+scode() { code "$H/cgi-bin/files_size.cgi?p=$1"; }
+mkdir -p "$M/Disk1/sz/inner"; dd if=/dev/zero of="$M/Disk1/sz/inner/a.bin" bs=1024 count=2048 2>/dev/null; dd if=/dev/zero of="$M/Disk1/sz/b.bin" bs=1024 count=1024 2>/dev/null
+check "size of a folder is 3 MB of blocks" "$(size "$(enc "$M/Disk1/sz")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')" 3145728
+check "size of an empty folder answers" "$(scode "$(enc "$M/Disk1/empty")")" 200
+check "size of the all-disks root is refused" "$(scode "$(enc "$M")")" 400
+check "size of a file is refused" "$(scode "$(enc "$M/Disk1/Photos/beach.jpg")")" 400
+check "size of a missing folder is 404" "$(scode "$(enc "$M/Disk1/nope")")" 404
+check "size of an escaping link is refused" "$(scode "$(enc "$M/Disk1/escape")")" 403
+check "size of ../ is refused" "$(scode "$(enc "$M/Disk1/../../etc")")" 403
+check "size of /Alt-F is refused" "$(scode "$(enc "$M/Disk1/Alt-F")")" 403
+curl -s -o /dev/null -w '%{http_code}' "$H/cgi-bin/files_size.cgi?p=$(enc "$M/Disk1/sz")" | grep -q 401 && ok "size needs a session" || bad "size without a session"
+dd if=/dev/zero of="$M/Disk1/Alt-F/big.bin" bs=1024 count=4096 2>/dev/null
+a=$(size "$(enc "$M/Disk1")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+mv "$M/Disk1/Alt-F/big.bin" "$SANDBOX/big.bin"
+b=$(size "$(enc "$M/Disk1")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')
+check "a disk's size leaves out Alt-F's folder" "$a" "$b"
+mkdir "$LOCKDIR" 2>/dev/null; sleep 30 & lp=$!; echo $lp > "$LOCKDIR/pid"
+check "a second count while one runs is told to wait" "$(scode "$(enc "$M/Disk1/sz")")" 503
+kill $lp; wait $lp 2>/dev/null
+check "a lock left by a dead count is cleaned up" "$(scode "$(enc "$M/Disk1/sz")")" 200
+[ ! -d "$LOCKDIR" ] && ok "the lock is released afterwards" || bad "lock left behind"
+# a copy whose count never finishes, with a 1 second limit
+sed 's/^FS_SIZE_LIMIT=60/FS_SIZE_LIMIT=1/; s/nice du -skx "\$@"/sleep 20/' "$SANDBOX/www/cgi-bin/files_size.cgi" > "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
+chmod +x "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
+check "a count that takes too long is stopped with 504" "$(code "$H/cgi-bin/files_size_slow.cgi?p=$(enc "$M/Disk1/sz")")" 504
+[ ! -d "$LOCKDIR" ] && ok "and the lock is released" || bad "lock left after timeout"
+rm -f "$SANDBOX/www/cgi-bin/files_size_slow.cgi"
+
+echo "== up one folder"
+up() { curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$1")" | grep -o 'href="[^"]*" aria-label="Up one folder"' | head -1; }
+check "a disk's folder links up to all disks" "$(up "$M/Disk1")" "href=\"/cgi-bin/files.cgi?nojs=1&amp;p=$M\" aria-label=\"Up one folder\""
+check "a sub folder links up to its parent" "$(up "$M/Disk1/Photos")" "href=\"/cgi-bin/files.cgi?nojs=1&amp;p=$M/Disk1\" aria-label=\"Up one folder\""
+check "the all-disks view has no up row" "$(up "$M")" ""
+curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1/empty")" | grep -q 'This folder is empty' && ok "an empty folder still shows the up row and its message" || bad "empty folder page"
+
+echo "== simple (no JavaScript) page"
+page=$(curl -s -b "$JAR" "$H/cgi-bin/files.cgi?nojs=1&p=$(enc "$M/Disk1")")
+echo "$page" | grep -q 'it&#39;s\|it&apos;s\|it.s &quot;quoted&quot; &amp; more.txt' && ok "html page escapes quotes and ampersand" || bad "html escaping"
+echo "$page" | grep -q '<script>alert' && bad "unescaped script in listing" || ok "no raw script tag in listing"
+echo "$page" | grep -q 'a&lt;b&gt;&amp;amp;.txt' && ok "angle brackets escaped" || bad "angle bracket escaping"
+
+echo
+echo "passed: $PASS  failed: $FAIL"
+[ "$FAIL" -eq 0 ]

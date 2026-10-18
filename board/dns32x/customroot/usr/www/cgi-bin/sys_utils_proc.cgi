@@ -287,6 +287,7 @@ case "$action" in
 #			rm -f /tmp/cookie
 		if test "$passwd" = $(cat /etc/web-secret /tmp/salt | md5sum - | cut -d" " -f1); then
 			rm -f $SECR /tmp/cookie /tmp/salt
+			rm -rf /tmp/sessions
 		else
 			msg "Password doesn't match."
 		fi

@@ -1,82 +1,29 @@
 #!/bin/sh
 
 source ./common.sh
+case "$QUERY_STRING" in refresh=*) check_cookie api ;; *) check_cookie ;; esac
 
 # Based on original idea and code contributed by Dwight Hubbard, dwight.hubbard <guess> gmail.com
 # Modified and adapted by Joao Cardoso
-launch() {
-	echo "<div id=\"$1\">"
+# Markup rewritten for the shared Alt-F stylesheet; the data collection is unchanged.
+
+# live <section>: print the section inside a wrapper that the page can refresh by itself.
+# The wrapper stays empty (and hidden) when the section has nothing to show.
+live() {
+	printf '<div class="live" id="%s" data-refresh="/cgi-bin/status.cgi?refresh=%s">' "$1" "$1"
 	$1
-	echo "</div>"
-	return 0;
-}
-
-# Based on original idea and code contributed by Dwight Hubbard, dwight.hubbard <guess> gmail.com
-# Modified and adapted by Joao Cardoso
-jscripts() {
-	cat<<-EOF
-		<noscript>
-			<p class="error"><strong>
-				JavaScript is needed by Alt-F web pages, and you don't have it enabled.<br>
-				See <a href="http://www.enable-javascript.com" target="_blank">
-				how to enable JavaSCript</a> on your browser.
-			</strong></p>
-		</noscript>
-		<script type="text/javascript">
-			arefresh = false
-			function requestfromserver(target, refresh) {
-				var req = new XMLHttpRequest();
-				if (req == null)
-					return;
-
-				req.onreadystatechange = function() {
-					if (req.readyState != 4) return; // only if req is "loaded"
-					if (req.status != 200) return; // only if "OK"
-						document.getElementById(target).innerHTML = req.responseText;
-					delete req;
-					if (arefresh == true && refresh != 0)
-						setTimeout(	function() {requestfromserver(target, refresh);}, refresh * 1000);
-				}
-				url="/cgi-bin/status.cgi?refresh=" + target
-				req.open("GET", url, true);
-				req.send();
-			}
-
-			function frefresh(obj) {
-				arg = obj.checked == true ? "yes" : "no"
-
-				if (arg == "yes") {
-					arefresh = true
-					requestfromserver('systems_st', 11)
-					requestfromserver('network_st', 11)
-					requestfromserver('disks_st', 13)
-					requestfromserver('raid_st', 13)
-					requestfromserver('mounted_filesystems_st', 17)
-					requestfromserver('mounted_remote_filesystems_st', 17)
-					requestfromserver('remotely_mounted_filesystems_st', 19)
-					requestfromserver('backup_st', 19)
-					requestfromserver('filesystem_maintenance_st', 23)
-					requestfromserver('printers_st', 23)
-					requestfromserver('error_st', 31)
-					requestfromserver('news_st', 59)
-				}
-				else
-					arefresh = false
-			}
-		</script>
-	EOF
+	printf '</div>\n'
 }
 
 error_st() {
 	if test -s $SERRORL; then
 		cat<<-EOF
-			<fieldset><legend class="red">Errors/Warnings</legend>
+			<section class="card"><h2>Warnings</h2>
 			<form action="/cgi-bin/sys_utils_proc.cgi" method="post">
-			Examine and Clear the error/warning messages:
-			<input type=submit name="logaction" value="$SERRORL">
-			</form>
+			<p>The NAS has recorded these warnings. Once you have dealt with them, you can clear the list.</p>
 			<ul>$(cat $SERRORL)</ul>
-			</fieldset>
+			<div class="actions"><button class="btn" type="submit" name="logaction" value="$SERRORL">Clear the warnings</button></div>
+			</form></section>
 		EOF
 	fi
 }
@@ -84,13 +31,11 @@ error_st() {
 news_st() {
 	if test -s $NEWSL; then
 		cat<<-EOF
-			<fieldset><legend>News</legend>
+			<section class="card"><h2>News</h2>
 			<form action="/cgi-bin/sys_utils_proc.cgi" method="post">
-			Examine and Clear News messages:
-			<input type=submit name="logaction" value="/var/log/news.log">
-			</form>
-			<pre>$(cat $NEWSL)</pre>
-			</fieldset>
+			<pre>$(esc "$(cat $NEWSL)")</pre>
+			<div class="actions"><button class="btn" type="submit" name="logaction" value="/var/log/news.log">Mark news as read</button></div>
+			</form></section>
 		EOF
 	fi
 }
@@ -139,36 +84,33 @@ systems_st() {
 		fi
 
 		eval $(awk '{printf "tempt=\"%.1f\"; temp=\"%d\"", $1 / 1000, $1 / 10 / '$crit_temp'}' /tmp/sys/temp1_input)
-		tempv="${tempt}&deg;C/$(celtofar $tempt)&deg;F"
+		tempv="${tempt}°C/$(celtofar $tempt)°F"
 		fanv=$(cat /tmp/sys/fan1_input)
 		fan=$(expr $fanv \* 100 / $max_fan_speed)
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>System</legend>
-		<table><tr>
-			<td><div class="bgl">Temperature</div> $(drawbargraph $temp $tempv )</td>
-			<td><div class="bgl">Fan speed</div> $(drawbargraph $fan $fanv)</td>
-			<td><div class="bgl">Load</div> $(drawbargraph $load $loadv)</td>
-			<td><div class="bgl">CPU</div> $(drawbargraph $cpu)</td>
-			<td><div class="bgl">Memory</div> $(drawbargraph $mem "$mem% of $physmem" $memalert)</td>
-			<td><div class="bgl">Swap</div> $(drawbargraph $swap "$swapv")</td>
-		</tr><tr>
-			<td colspan=2><strong>Name:</strong> $(hostname -s)</td><td></td>
-			<td colspan=2><strong>Model:</strong> $board</td><td></td>
-		</tr><tr>
-			<td colspan=3><strong>Date:</strong> $(date)</td>
-			<td colspan=2><strong>Uptime:</strong> $up</td><td></td>
-		</tr></table></fieldset>
+		<section class="card"><h2>System</h2>
+		<div class="stats">
+		<div><div class="bgl">Temperature</div>$(ui_meter $temp "$tempv")</div>
+		<div><div class="bgl">Fan speed</div>$(ui_meter $fan "$fanv")</div>
+		<div><div class="bgl">Load</div>$(ui_meter $load "$loadv")</div>
+		<div><div class="bgl">CPU</div>$(ui_meter $cpu "$cpu%")</div>
+		<div><div class="bgl">Memory</div>$(ui_meter $mem "$mem% of $physmem" $memalert)</div>
+		<div><div class="bgl">Swap</div>$(ui_meter $swap "$swapv")</div>
+		</div>
+		<dl class="facts">
+		<dt>Name</dt><dd>$(esc "$(hostname -s)")</dd>
+		<dt>Model</dt><dd>$(esc "$board")</dd>
+		<dt>Date</dt><dd>$(esc "$(date)")</dd>
+		<dt>Uptime</dt><dd>$up</dd>
+		</dl></section>
 	EOF
 }
 
 network_st() {
 	Mode=$(cat /sys/class/net/eth0/duplex)
 	MTU=$(cat /sys/class/net/eth0/mtu)
-#	MAC=$(cat /sys/class/net/eth0/address)
-#	Tx=$(cat /sys/class/net/eth0/statistics/tx_bytes)
-#	Rx=$(cat /sys/class/net/eth0/statistics/rx_bytes)
 
 	eval $(ifconfig eth0 | awk \
 			'/RX bytes/ {printf "Rx=\"%s%s\";", $3, $4} \
@@ -178,43 +120,47 @@ network_st() {
 			END {printf "ipv6=\"%s\"", ipv6}' | tr -d "()")
 
 	if test -n "$ipv6"; then
-		IPV6="<br><strong>IPv6:</strong>$ipv6"
+		IPV6="<dt>IPv6</dt><dd>$(esc "$ipv6")</dd>"
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Network</legend>
-		<strong>Speed:</strong>$(cat /sys/class/net/eth0/speed)Mbps
-		<strong>Duplex:</strong>$Mode
-		<strong>MTU:</strong>$MTU
-		<strong>TX:</strong>$Tx
-		<strong>Rx:</strong>$Rx
-		<strong>IP:</strong>$IP
+		<section class="card"><h2>Network</h2>
+		<dl class="facts">
+		<dt>Speed</dt><dd>$(cat /sys/class/net/eth0/speed) Mbps</dd>
+		<dt>Duplex</dt><dd>$(esc "$Mode")</dd>
+		<dt>MTU</dt><dd>$(esc "$MTU")</dd>
+		<dt>Sent</dt><dd>$(esc "$Tx")</dd>
+		<dt>Received</dt><dd>$(esc "$Rx")</dd>
+		<dt>IP address</dt><dd>$(esc "$IP")</dd>
 		$IPV6
-		</fieldset>
+		</dl></section>
 	EOF
 }
 
 disks_st() {
-	if ! has_disks; then
+	_any=""
+	for _d in /dev/sd?; do if test -b "$_d"; then _any=yes; fi; done
+	if test -z "$_any"; then
+		echo '<section class="card"><h2>Disks</h2><p class="empty">No disks found. Plug in a drive and refresh.</p></section>'
 		return 0
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Disks</legend>
-		<table><tr><th align=left>Bay</th>
-		<th>Dev.</th>
+		<section class="card"><h2>Disks</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr><th>Bay</th>
+		<th>Device</th>
 		<th>Model</th>
 		<th>Capacity</th>
-		<th>Power Status</th>
-		<th>Temp</th>
+		<th>Power</th>
+		<th>Temperature</th>
 		<th>Health</th>
-		</tr>
+		</tr></thead><tbody>
 	EOF
 
 	for i in /dev/sd?; do
 		dsk=$(basename $i)
 
-		temp="--"; fam=""; mod="None"; tcap=""; pstatus="--"; health_st="--"
+		temp="--"; fam=""; mod="None"; tcap=""; pstatus="--"; health_st="--"; health_cls=""
 		disk_details $dsk
 
 		smartctl -n standby -iAH $i >& /tmp/smt_$dsk
@@ -225,32 +171,38 @@ disks_st() {
 				print "health_st=\"--\";"
 				if (st == 2) print "pstatus=\"standby\";"}
 			/SMART overall-health/ {
-				if (st == 0) color="black"
-				else if  (st == 32) color="blue"
-				else color="red"
-				printf "health_st=\"<span class=\"%s\">%s</span>\";", color, tolower($NF) }
+				if (st == 0) cls="ok"
+				else if  (st == 32) cls="warn"
+				else cls="bad"
+				printf "health_cls=\"%s\"; health_st=\"%s\";", cls, tolower($NF) }
 			/Power mode is:/ { printf "pstatus=\"%s\";",
 				tolower(substr($0, index($0,":")+2))} ' /tmp/smt_$dsk)
 		rm -f /tmp/smt_$dsk
 
 		if isnumber $temp; then
-			temp="${temp}&deg;C/$(celtofar $temp)&deg;F"
+			temp="${temp}°C/$(celtofar $temp)°F"
+		fi
+
+		if test -n "$health_cls"; then
+			health_html="<span class=\"pill $health_cls\">$(esc "$health_st")</span>"
+		else
+			health_html="$(esc "$health_st")"
 		fi
 
 		cat<<-EOF
-			<tr align=center>
-			<td align=left>$dbay</td>
-			<td>$dsk</td>
-			<td align=left>$dmod</td>
-			<td> $dcap </td>
-			<td id=${dsk}_pstatus_id> $pstatus </td>
-			<td id=${dsk}_temp_id> $temp </td>
-			<td id=${dsk}_health_id> $health_st </td>
+			<tr>
+			<td data-label="Bay">$(esc "$dbay")</td>
+			<td data-label="Device">$(esc "$dsk")</td>
+			<td data-label="Model">$(esc "$dmod")</td>
+			<td data-label="Capacity">$(esc "$dcap")</td>
+			<td data-label="Power" id="${dsk}_pstatus_id">$(esc "$pstatus")</td>
+			<td data-label="Temperature" id="${dsk}_temp_id">$temp</td>
+			<td data-label="Health" id="${dsk}_health_id">$health_html</td>
 			</tr>
 		EOF
 
 	done
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 raid_st() {
@@ -259,14 +211,14 @@ raid_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>RAID</legend>
-		<table><tr align=center>
-		<th align=left>Dev.</th>
+		<section class="card"><h2>RAID</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr>
+		<th>Device</th>
 		<th>Capacity</th>
 		<th>Level</th><th>State</th>
 		<th>Status</th><th>Action</th>
 		<th>Done</th><th>ETA</th>
- 		</tr>
+		</tr></thead><tbody>
 	EOF
 
 	for i in /dev/md[0-9]*; do
@@ -282,39 +234,40 @@ raid_st() {
 			sz=$(awk '{ printf "%.1fGB", $1/2/1024/1024}' /sys/block/$mdev/size)
 			if test "$type" = "raid1" -o "$type" = "raid5"; then
 				if test "$(cat /sys/block/$mdev/md/degraded)" != 0; then
-					deg="<span class=\"red\">degraded</span>"
+					deg="<span class=\"pill bad\">degraded</span>"
 				else
-					deg="OK"
+					deg="<span class=\"pill ok\">OK</span>"
 				fi
 				act=$(cat /sys/block/$mdev/md/sync_action)
 				scompl=$(cat /sys/block/$mdev/md/sync_completed)
 				if test "$act" != "idle"; then
-					act="<span class=\"red\"> $act </span>"
+					act="<span class=\"red\">$(esc "$act")</span>"
 					if test "$scompl" != "delayed"; then
-						compl=$(drawbargraph $(echo $scompl | awk '{printf "%d", $1 * 100 / $3}'))
+						pc=$(echo $scompl | awk '{printf "%d", $1 * 100 / $3}')
+						compl=$(ui_meter $pc "$pc%")
 						speed=$(cat /sys/block/$mdev/md/sync_speed)
 						exp=$(echo $scompl | awk '{printf "%.1fmin", ($3 - $1) * 512 / 1000 / '$speed' / 60}' 2> /dev/null)
 					else
-						compl=$(drawbargraph 0)
+						compl=$(ui_meter 0 "0%")
 						exp="delayed"
 					fi
 				fi
 			fi
 		fi
 		cat<<-EOF
-			<tr align=center>
-			<td align=left>$mdev</td>
-			<td>$sz</td>
-			<td>$type</td>
-			<td>$state</td>
-			<td>$deg</td>
-			<td>$act</td>
-			<td align=left>$compl</td>
-			<td>$exp</td>
+			<tr>
+			<td data-label="Device">$(esc "$mdev")</td>
+			<td data-label="Capacity">$sz</td>
+			<td data-label="Level">$(esc "$type")</td>
+			<td data-label="State">$(esc "$state")</td>
+			<td data-label="Status">$deg</td>
+			<td data-label="Action">$act</td>
+			<td data-label="Done">$compl</td>
+			<td data-label="ETA">$exp</td>
 			</tr>
 		EOF
 	done
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 filesys() {
@@ -379,14 +332,14 @@ filesys() {
 
 	cat<<-EOF
 		<tr>
-		<td>$dname</td>
-		<td>$lbl</td>
-		<td align=right>${cap}B</td>
-		<td>$(drawbargraph $perc ${free}B)</td>
-		<td>$type</td>
-		<td>$MD</td>
-		<td><span class="red">$dirty</span> </td>
-		<td>$cnt $days</td>
+		<td data-label="Device">$(esc "$dname")</td>
+		<td data-label="Label">$(esc "$lbl")</td>
+		<td data-label="Capacity" class="num">${cap}B</td>
+		<td data-label="Available">$(ui_meter $perc "${free}B free")</td>
+		<td data-label="Type">$(esc "$type")</td>
+		<td data-label="Mode">$MD</td>
+		<td data-label="Dirty"><span class="red">$dirty</span></td>
+		<td data-label="Automatic check in">$cnt $days</td>
 		</tr>
 	EOF
 }
@@ -397,21 +350,21 @@ mounted_filesystems_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Mounted Filesystems</legend>
-		<table><tr align=center>
-		<th>Dev.</th>
+		<section class="card"><h2>Mounted filesystems</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr>
+		<th>Device</th>
 		<th>Label</th>
-		<th>Capacity</th><th>Available</th>
-		<th>FS</th><th>Mode</th>
-		<th>Dirty</th><th>Automatic FSCK in</th>
-		</tr>
+		<th class="num">Capacity</th><th>Available</th>
+		<th>Type</th><th>Mode</th>
+		<th>Dirty</th><th>Automatic check in</th>
+		</tr></thead><tbody>
 	EOF
 
 	for dsk in $(cut -d" " -f1 /proc/mounts | grep '^/dev/\(sd\|md\|dm-\)' | sort -u); do
 		filesys $dsk
 	done
 
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 mounted_remote_filesystems_st() {
@@ -420,14 +373,14 @@ mounted_remote_filesystems_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Mounted Remote Filesystems</legend>
-		<table><tr align="left">
+		<section class="card"><h2>Folders mounted from other computers</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr>
 		<th>Host</th>
-		<th>Remote Share</th>
-		<th>Local Folder</th>
-		<th>Capacity</th><th>Available</th>
-		<th>FS</th>
-		</tr>
+		<th>Remote share</th>
+		<th>Local folder</th>
+		<th class="num">Capacity</th><th>Available</th>
+		<th>Type</th>
+		</tr></thead><tbody>
 	EOF
 
 	while read -r rhost mnt fs rest; do
@@ -445,15 +398,15 @@ mounted_remote_filesystems_st() {
 
 			# "df" breaks lines when they are long, usernames can have spaces
 			eval $(df -h "$mnt" | grep -v Filesystem | tr -d '\n' | awk '{bs=NF-4; printf "sz=%sB; avai=%sB; perc=%d", $bs, $(bs+2), $(bs+3)}')
-			echo "<tr><td>$rrhost</td>
-				<td>$rrdir</td>
-				<td>$mnt</td>
-				<td>$sz</td>
-				<td>$(drawbargraph $perc $avai)</td>
-				<td>$fs</td></tr>"
+			echo "<tr><td data-label=\"Host\">$(esc "$rrhost")</td>
+				<td data-label=\"Remote share\">$(esc "$rrdir")</td>
+				<td data-label=\"Local folder\">$(esc "$mnt")</td>
+				<td data-label=\"Capacity\" class=\"num\">$sz</td>
+				<td data-label=\"Available\">$(ui_meter $perc "$avai free")</td>
+				<td data-label=\"Type\">$fs</td></tr>"
 		fi
 	done < /proc/mounts
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 remotely_mounted_filesystems_st() {
@@ -465,12 +418,12 @@ remotely_mounted_filesystems_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Remotely Mounted Filesystems</legend>
-		<table><tr align=center>
+		<section class="card"><h2>Computers using your shared folders</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr>
 		<th>Host</th>
 		<th>Share</th>
-		<th>FS</th>
-		</tr>
+		<th>Type</th>
+		</tr></thead><tbody>
 	EOF
 
 	if test -n "$smbm"; then
@@ -479,20 +432,21 @@ remotely_mounted_filesystems_st() {
 			pos = index($0, $(srv + 1))
 			share = substr($0, 1, pos-1)
 			host = $(srv+2)
-			#if (NF == 7) host="--"
-			printf("<tr><td>%s</td><td>%s</td><td>cifs</td></tr>\n", host, share)
+			gsub(/&/, "\\&amp;", share); gsub(/</, "\\&lt;", share); gsub(/>/, "\\&gt;", share)
+			gsub(/&/, "\\&amp;", host); gsub(/</, "\\&lt;", host); gsub(/>/, "\\&gt;", host)
+			printf("<tr><td data-label=\"Host\">%s</td><td data-label=\"Share\">%s</td><td data-label=\"Type\">cifs</td></tr>\n", host, share)
 			}' | sort -u
 	fi
 
 	if test -n "$nfsm"; then
-		IOIFS="$IFS"; IFS=:
+		OIFS="$IFS"; IFS=:
 		echo "$nfsm" | while read host dir; do
 			host=$(gethname "$host")
-			echo "<tr><td>$host</td><td>$dir</td><td>nfs</td></tr>"
+			echo "<tr><td data-label=\"Host\">$(esc "$host")</td><td data-label=\"Share\">$(esc "$dir")</td><td data-label=\"Type\">nfs</td></tr>"
 		done
 		IFS="$OIFS"
 	fi
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 backup_st() {
@@ -507,8 +461,8 @@ backup_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Backup</legend>
-		<table><tr><th>ID</th><th>Type</th><th>Folder</th><th>State</th></tr>
+		<section class="card"><h2>Backup</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr><th>ID</th><th>Type</th><th>Folder</th><th>State</th></tr></thead><tbody>
 	EOF
 
 	for i in /tmp/backup-state.*; do
@@ -523,11 +477,13 @@ backup_st() {
 		type=$(grep ^$id /etc/backup.conf | cut -d";" -f2)
 		if test "$st" = "In progress"; then
 			st="<span class=\"red\">In progress</span>"
+		else
+			st=$(esc "$st")
 		fi
-		echo "<tr><td>$id</td><td>$type</td><td>$bdir</td><td align=center>$st</td></tr>"
+		echo "<tr><td data-label=\"ID\">$(esc "$id")</td><td data-label=\"Type\">$(esc "$type")</td><td data-label=\"Folder\">$(esc "$bdir")</td><td data-label=\"State\">$st</td></tr>"
 	done
 
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 filesystem_maintenance_st() {
@@ -537,8 +493,8 @@ filesystem_maintenance_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Filesystem Maintenance</legend>
-		<table><tr><th>Dev.</th><th>Label</th><th>Operation</th></tr>
+		<section class="card"><h2>Disk maintenance in progress</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr><th>Device</th><th>Label</th><th>Operation</th></tr></thead><tbody>
 	EOF
 
 	for j in /dev/sd[a-z][1-9] /dev/md[0-9]* /dev/dm-*; do
@@ -546,12 +502,12 @@ filesystem_maintenance_st() {
 		fs_progress $part # global ln
 		if test -n "$ln"; then
 			cat<<-EOF
-				<tr><td>$part</td><td>$(plabel $part)</td>
-				<td><span class="red">$ln</span></td></tr>
+				<tr><td data-label="Device">$(esc "$part")</td><td data-label="Label">$(esc "$(plabel $part)")</td>
+				<td data-label="Operation"><span class="red">$ln</span></td></tr>
 			EOF
 		fi
 	done
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 printers_st() {
@@ -560,8 +516,8 @@ printers_st() {
 	fi
 
 	cat<<-EOF
-		<fieldset><legend>Printers</legend>
-		<table><tr><th>Name</th><th>Model</th><th>Jobs</th></tr>
+		<section class="card"><h2>Printers</h2>
+		<div class="tablewrap"><table class="stack"><thead><tr><th>Name</th><th>Model</th><th>Jobs</th></tr></thead><tbody>
 	EOF
 
 	while read ln; do
@@ -578,10 +534,10 @@ printers_st() {
 				jb=$(lpstat 2> /dev/null | grep ^$pr | wc -l)
 			fi
 		fi
-		echo "<tr><td>$pr</td><td>$desc</td><td>$jb</td></tr>"
+		echo "<tr><td data-label=\"Name\">$(esc "$pr")</td><td data-label=\"Model\">$(esc "$desc")</td><td data-label=\"Jobs\">$jb</td></tr>"
 
 	done < /etc/printcap
-	echo "</table></fieldset>"
+	echo "</tbody></table></div></section>"
 }
 
 if test -n "$QUERY_STRING"; then
@@ -602,26 +558,28 @@ filesystem_maintenance_st printers_st"
 
 if test -n "$refresh"; then
 	if echo $apl | grep -qw $refresh; then
-		html_header
+		printf 'Content-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\n\r\n'
 		$refresh
-		echo "</body></html>"
 	fi
 	exit 0
 fi
 
-ver="$(cat /etc/Alt-F)"
-LOCAL_STYLE='.bgl {text-align: center; font-weight: bold; width: 100px; }'
-write_header "Alt-F $ver Status Page"
-jscripts
+page_start "Health" status
 
-mktt st_tt "Checking this will refresh different sections in the page every 10 to 20 seconds.<br>
-This consumes CPU, so if you are waiting for something lengthly to accomplish<br>
-it will actually take more time if autorefresh is enabled."
-
-for i in $apl; do launch $i; done
+health_check
+case "$HEALTH_LEVEL" in
+	ok)   echo '<div class="banner ok">Everything looks fine.</div>' ;;
+	warn) echo "<div class=\"banner warn\">$(esc "$HEALTH_MSGS" | sed 's/$/<br>/')</div>" ;;
+	bad)  echo "<div class=\"banner bad\">$(esc "$HEALTH_MSGS" | sed 's/$/<br>/')</div>" ;;
+esac
 
 cat<<EOF
-	<form action="">
-Autorefresh <input type=checkbox name="arefresh" value="yes" onclick="frefresh(this)" $(ttip st_tt)>
-	</form></body></html>
+<h1>Health</h1>
+<p class="lead">How the disks, network and the NAS itself are doing. Alt-F $(esc "$(cat /etc/Alt-F)").</p>
+<noscript><p class="notice">Automatic refresh needs JavaScript. You can still reload this page yourself.</p></noscript>
+<form action="" class="check"><label class="check"><input type="checkbox" id="autorefresh"> Refresh this page automatically every few seconds</label></form>
 EOF
+
+for i in $apl; do live $i; done
+
+page_end
