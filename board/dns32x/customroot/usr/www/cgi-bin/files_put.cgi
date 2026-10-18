@@ -83,6 +83,11 @@ else
 	if ! fs_name_ok "$rel"; then fail "400 Bad Request" name "That file name can't be used."; fi
 fi
 
+# nothing can be created under the names Alt-F keeps for itself at the top of a disk
+if test "${FS_REAL%/*}" = "$FS_ROOT" && fs_private "${rel%%/*}"; then
+	fail "400 Bad Request" name "That name is used by Alt-F itself and can't be used here."
+fi
+
 # folders inside the upload (folder uploads), created safely
 dir=$FS_REAL
 file=${rel##*/}

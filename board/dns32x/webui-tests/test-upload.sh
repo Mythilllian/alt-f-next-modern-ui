@@ -96,6 +96,14 @@ r=$(put "$U/a.txt" "evil.txt" "$SANDBOX/a.txt"); check "a file as the target" "$
 r=$(put "$U/missing" "evil.txt" "$SANDBOX/a.txt"); check "a missing target folder" "$(code "$r")" 404
 mkdir -p "$M/Disk1/ro"; chmod 555 "$M/Disk1/ro"; r=$(put "$M/Disk1/ro" "x.txt" "$SANDBOX/a.txt"); check "read-only folder" "$(code "$r")" 403; chmod 755 "$M/Disk1/ro"
 
+echo "== Alt-F's own names are off limits for uploads"
+for n in "Alt-F" "ffp/x.txt" "opt" "lost+found/y" "aquota.user"; do
+	r=$(put "$M/Disk1" "$n" "$SANDBOX/a.txt"); check "no upload named '$n' at the top of a disk" "$(code "$r")" 400
+done
+r=$(put "$M/Disk1/Alt-F" "x.txt" "$SANDBOX/a.txt"); case "$(code "$r")" in 403|404) ok "no upload into Alt-F's folder" ;; *) bad "upload into Alt-F's folder: $r" ;; esac
+r=$(put "$M/Disk1" "Alt-F/x.txt" "$SANDBOX/a.txt"); [ ! -e "$M/Disk1/Alt-F" ] && ok "nothing was created" || bad "Alt-F was created"
+r=$(put "$U" "opt" "$SANDBOX/a.txt"); check "a file called opt deeper down is fine" "$(code "$r")" 200
+
 echo "== disk space"
 : > "$SANDBOX/df-small"
 r=$(put "$U" "full.txt" "$SANDBOX/a.txt"); check "not enough room is 413" "$(code "$r")" 413

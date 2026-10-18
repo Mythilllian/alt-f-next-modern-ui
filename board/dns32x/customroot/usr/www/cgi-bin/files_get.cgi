@@ -28,7 +28,12 @@ if test -d "$FS_REAL"; then
 	printf 'Content-Disposition: attachment; filename="%s.tar"; filename*=UTF-8'"''"'%s.tar\r\n' "$ascii" "$utf8"
 	printf 'X-Content-Type-Options: nosniff\r\nCache-Control: private, no-store\r\n\r\n'
 	# no Content-Length: the size is not known before the archive is made
-	cd "${FS_REAL%/*}" && exec tar -cf - -- "$name" 2>/dev/null
+	# the top folder of a disk holds Alt-F's own files, which are left out
+	set --
+	if test "${FS_REAL%/*}" = "$FS_ROOT"; then
+		for _p in $FS_PRIVATE; do set -- "$@" --exclude "$name/$_p"; done
+	fi
+	cd "${FS_REAL%/*}" && exec tar -cf - "$@" -- "$name" 2>/dev/null
 	exit 0
 fi
 if ! test -f "$FS_REAL" -a -r "$FS_REAL"; then fail "404 Not Found" missing; fi

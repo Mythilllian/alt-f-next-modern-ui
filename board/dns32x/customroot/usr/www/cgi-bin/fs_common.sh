@@ -7,6 +7,19 @@ FS_LIMIT=1000
 
 fs_param() { qparam "$1"; }
 
+# Folders and files that Alt-F itself keeps in the top folder of a disk. They are hidden
+# from the browser and cannot be opened, downloaded or uploaded into, so nobody can
+# change or delete them by accident from the web page.
+FS_PRIVATE="Alt-F ffp opt lost+found aquota.user aquota.group"
+
+# fs_private <name>: true for one of those names
+fs_private() {
+	case "$1" in
+		Alt-F|ffp|opt|lost+found|aquota.user|aquota.group) return 0 ;;
+	esac
+	return 1
+}
+
 # fs_resolve <percent-encoded path>: on success sets FS_REAL to the canonical path.
 # On failure returns 1 and sets FS_ERR to bad, outside or missing.
 #  - control characters and NUL, in raw or percent-encoded form, are refused
@@ -29,6 +42,11 @@ fs_resolve() {
 	case "$FS_REAL" in
 		*[[:cntrl:]]*) FS_ERR=bad; return 1 ;;
 		"$FS_ROOT"|"$FS_ROOT"/*)
+			# /mnt/<disk>/<private name>[/...] is off limits
+			_r=${FS_REAL#"$FS_ROOT"/}
+			case "$_r" in
+				*/*) _r=${_r#*/}; if fs_private "${_r%%/*}"; then FS_ERR=outside; return 1; fi ;;
+			esac
 			# realpath does not insist that the last part exists
 			if test -e "$FS_REAL"; then return 0; fi
 			FS_ERR=missing; return 1 ;;
@@ -101,6 +119,8 @@ fs_tsv() {
 	if test "$_lines" -ne "$#"; then _fast=""; else _fast=1; fi
 
 	_count=0; _first=1
+	_atroot=0
+	if test "${_dir%/*}" = "$FS_ROOT"; then _atroot=1; fi
 	while test "$#" -gt 0; do
 		_f=$1; shift
 		if test -n "$_fast"; then
@@ -114,6 +134,7 @@ fs_tsv() {
 		fi
 		_name=${_f##*/}
 		case "$_name" in *[[:cntrl:]]*|lost+found) continue ;; esac
+		if test "$_atroot" = 1 && fs_private "$_name"; then continue; fi
 		if test "$_count" -ge "$FS_LIMIT"; then echo "!truncated"; break; fi
 
 		_type=""
