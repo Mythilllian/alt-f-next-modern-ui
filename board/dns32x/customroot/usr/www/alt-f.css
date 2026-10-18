@@ -364,8 +364,7 @@ ul.files { list-style: none; margin: 0; padding: 0; }
 ul.files li { border-bottom: 1px solid var(--line); }
 ul.files li:last-child { border-bottom: 0; }
 .row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+  display: flex;
   align-items: center;
   gap: var(--sp-3);
   min-height: var(--tap);
@@ -374,13 +373,15 @@ ul.files li:last-child { border-bottom: 0; }
 .row .name { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text); text-decoration: none; background: none; border: 0; font: inherit; text-align: left; cursor: pointer; min-height: var(--tap); padding: 0; }
 .row .name:hover { text-decoration: underline; }
 .row .meta { color: var(--muted); font-size: var(--fs-0); white-space: nowrap; }
+.head { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; flex: 1 1 auto; }
+.tog { flex: none; width: var(--tap); height: var(--tap); border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; cursor: pointer; border-radius: var(--radius-sm); }
+.tog:hover { background: var(--surface-2); }
 .ico { flex: none; width: 1.75rem; text-align: center; }
 ul.files ul.files { margin-left: var(--sp-5); border-left: 2px solid var(--line); }
 .empty { text-align: center; color: var(--muted); padding: var(--sp-6) var(--sp-4); }
 .notice { color: var(--muted); }
 
 @media (max-width: 40rem) {
-  .row { grid-template-columns: 1fr auto; }
   .row .date { display: none; }
   ul.files ul.files { margin-left: var(--sp-3); }
 }

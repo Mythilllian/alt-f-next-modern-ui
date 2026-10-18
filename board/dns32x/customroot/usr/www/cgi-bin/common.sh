@@ -626,8 +626,9 @@ csrf_ok() {
 	test "$_h" = "$HTTP_HOST"
 }
 
-# check_cookie: call at the top of every protected page. Lets valid sessions through;
-# otherwise answers 401 to background requests and sends people to the login page.
+# check_cookie [api]: call at the top of every protected page. Lets valid sessions through;
+# otherwise answers 401 to background requests (or whenever "api" is given) and sends
+# people to the login page.
 check_cookie() {
 	if sess_valid; then
 		if csrf_ok; then return 0; fi
@@ -636,7 +637,7 @@ check_cookie() {
 		exit 0
 	fi
 
-	if test -n "$HTTP_X_REQUESTED_WITH"; then
+	if test -n "$HTTP_X_REQUESTED_WITH" -o "$1" = api; then
 		printf 'Status: 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nPlease sign in again.\n'
 		exit 0
 	fi

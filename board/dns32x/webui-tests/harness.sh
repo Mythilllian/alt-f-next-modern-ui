@@ -26,7 +26,7 @@ setup() {
 	done
 	# run every script with the sandbox shell and redirect the absolute paths the
 	# scripts use for secrets, sessions and the shared folder root into the sandbox
-	for f in "$SANDBOX"/www/cgi-bin/*.cgi "$SANDBOX"/www/cgi-bin/common.sh; do
+	for f in "$SANDBOX"/www/cgi-bin/*.cgi "$SANDBOX"/www/cgi-bin/*.sh; do
 		sed -i -e "1s|^#!/bin/sh|#!$SANDBOX/bin/sh|" \
 			-e "s|/etc/web-secret|$SANDBOX/etc/web-secret|g" \
 			-e "s|/etc/web-session.conf|$SANDBOX/etc/web-session.conf|g" \
