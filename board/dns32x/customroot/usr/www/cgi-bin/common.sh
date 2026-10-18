@@ -514,28 +514,136 @@ js_gotopage() {
 	exit 0
 }
 
-check_cookie() {
-	if test -n "$HTTP_COOKIE" -a -O /tmp/cookie; then
-		ALTFID=$(echo $HTTP_COOKIE | sed -n 's/ALTFID=\([^[:space:],;]*\).*/\1/p')
-        if test -n "$ALTFID"; then
-			if test $(expr $(date +%s) - $(date +%s -r /tmp/cookie) ) -lt 1800; then
-				if test "$(cat /tmp/cookie)" = "${ALTFID}"; then
-					touch /tmp/cookie
-					return
-				else
-					logger -t httpd "Unautorized access attempted with cookie \"${ALTFID}\""
-				fi
-			fi
-		fi
-		rm /tmp/cookie
+# ------------------------------------------------------------------
+# Login sessions.
+# After a good login, login_proc.cgi calls sess_new, which stores a random
+# token in $SESS_DIR (tmpfs). The browser gets it in the ALTSID cookie.
+# Every protected page calls check_cookie, the single place that validates it.
+# Session file content: "<created> <last-seen> <client-ip> <keep>"
+# Settings live in /etc/web-session.conf (see that file).
+# ------------------------------------------------------------------
+SESS_DIR=/tmp/sessions
+
+sess_conf() {
+	SESSION_IDLE=28800
+	SESSION_ABS=604800
+	SESSION_BIND_IP=yes
+	if test -r /etc/web-session.conf; then . /etc/web-session.conf; fi
+}
+
+# sess_token: set SESS_TOKEN from the ALTSID cookie (empty if absent or malformed)
+sess_token() {
+	SESS_TOKEN=""
+	_oifs=$IFS; IFS=';'; set -f
+	for _kv in $HTTP_COOKIE; do
+		_kv=${_kv#"${_kv%%[! ]*}"}
+		case "$_kv" in ALTSID=*) SESS_TOKEN=${_kv#ALTSID=} ;; esac
+	done
+	IFS=$_oifs; set +f
+	case "$SESS_TOKEN" in *[!0-9a-f]*) SESS_TOKEN="" ;; esac
+	if test "${#SESS_TOKEN}" -ne 64; then SESS_TOKEN=""; fi
+}
+
+# sess_rand <bytes>: random hex string from /dev/urandom
+sess_rand() {
+	dd if=/dev/urandom bs="$1" count=1 2>/dev/null | hexdump -ve '/1 "%02x"'
+}
+
+# sess_cleanup: drop expired sessions and stale login challenges. No cron needed,
+# it runs on every login.
+sess_cleanup() {
+	sess_conf
+	_now=$(date +%s)
+	for _f in "$SESS_DIR"/*; do
+		if ! test -f "$_f"; then continue; fi
+		_c=""; _l=""
+		read -r _c _l _rest < "$_f"
+		case "${_f##*/}" in
+			salt.*) if test $((_now - ${_c:-0})) -gt 600; then rm -f "$_f"; fi ;;
+			*)
+				if test $((_now - ${_l:-0})) -gt "$SESSION_IDLE" -o $((_now - ${_c:-0})) -gt "$SESSION_ABS"; then
+					rm -f "$_f"
+				fi ;;
+		esac
+	done
+}
+
+# sess_new <yes|no>: create a session for the current client, sets SESS_TOKEN
+sess_new() {
+	sess_conf
+	mkdir -p "$SESS_DIR"; chmod 700 "$SESS_DIR"
+	sess_cleanup
+	SESS_TOKEN=$(sess_rand 32)
+	_now=$(date +%s)
+	( umask 077; echo "$_now $_now ${REMOTE_ADDR:--} $1" > "$SESS_DIR/$SESS_TOKEN" )
+}
+
+# sess_cookie <yes|no> [secure]: print the Set-Cookie header for SESS_TOKEN
+sess_cookie() {
+	_ck="ALTSID=$SESS_TOKEN; Path=/; HttpOnly; SameSite=Strict"
+	if test "$1" = yes; then _ck="$_ck; Max-Age=$SESSION_ABS"; fi
+	if test -n "$2"; then _ck="$_ck; Secure"; fi
+	printf 'Set-Cookie: %s\r\n' "$_ck"
+}
+
+# sess_end: delete the session of the current request and print an expiring cookie
+sess_end() {
+	sess_token
+	if test -n "$SESS_TOKEN"; then rm -f "$SESS_DIR/$SESS_TOKEN"; fi
+	printf 'Set-Cookie: ALTSID=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0\r\n'
+}
+
+# sess_valid: true if the request carries a live session. Slides the idle timeout.
+sess_valid() {
+	sess_conf
+	sess_token
+	if test -z "$SESS_TOKEN" -o ! -f "$SESS_DIR/$SESS_TOKEN"; then return 1; fi
+	read -r _c _l _ip _keep < "$SESS_DIR/$SESS_TOKEN" || return 1
+	_now=$(date +%s)
+	if test $((_now - ${_l:-0})) -gt "$SESSION_IDLE" -o $((_now - ${_c:-0})) -gt "$SESSION_ABS"; then
+		rm -f "$SESS_DIR/$SESS_TOKEN"
+		return 1
 	fi
-	html_header
-	cat<<-EOF
-		<script type="text/javascript">
-			parent.frames.content.location.assign("/cgi-bin/login.cgi?$REQUEST_URI")
-			parent.frames.nav.location.assign("/cgi-bin/index.cgi")
-		</script></body></html>
-	EOF
+	if test "$SESSION_BIND_IP" = yes -a "$_ip" != "-" -a -n "$REMOTE_ADDR" -a "$_ip" != "$REMOTE_ADDR"; then
+		logger -t httpd "Session used from a different address ($REMOTE_ADDR, not $_ip)"
+		return 1
+	fi
+	# the file already exists with mode 600, so a plain redirect keeps it private
+	echo "$_c $_now $_ip $_keep" > "$SESS_DIR/$SESS_TOKEN"
+	return 0
+}
+
+# csrf_ok: state-changing (POST) requests must come from this very site.
+# Browsers always send Origin or Referer on a cross-site POST, so require one of them
+# and require its host to match the Host header.
+csrf_ok() {
+	if test "$REQUEST_METHOD" != POST; then return 0; fi
+	_o=$HTTP_ORIGIN
+	if test "$_o" = null; then _o=""; fi
+	if test -z "$_o"; then _o=$HTTP_REFERER; fi
+	if test -z "$_o"; then return 1; fi
+	_h=${_o#*://}; _h=${_h%%/*}
+	test "$_h" = "$HTTP_HOST"
+}
+
+# check_cookie: call at the top of every protected page. Lets valid sessions through;
+# otherwise answers 401 to background requests and sends people to the login page.
+check_cookie() {
+	if sess_valid; then
+		if csrf_ok; then return 0; fi
+		logger -t httpd "Rejected a form post from another site (${HTTP_ORIGIN:-$HTTP_REFERER})"
+		printf 'Status: 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nThis request did not come from the Alt-F pages.\n'
+		exit 0
+	fi
+
+	if test -n "$HTTP_X_REQUESTED_WITH"; then
+		printf 'Status: 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nPlease sign in again.\n'
+		exit 0
+	fi
+
+	_to=/cgi-bin/login.cgi
+	if test "$REQUEST_METHOD" != POST -a -n "$REQUEST_URI"; then _to="$_to?$REQUEST_URI"; fi
+	printf 'HTTP/1.1 303\r\nContent-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\nLocation: %s\r\n\r\n' "$_to"
 	exit 0
 }
 
@@ -801,6 +909,7 @@ ui_meter() {
 
 # page_start <title> [section]: HTTP header, <head>, top bar and navigation.
 # section is one of home files shares status advanced; it marks the current link.
+# section "login" prints a bare page with no navigation (used before signing in).
 page_start() {
 	HTML_HEADER_DONE="yes"
 	firstboot
@@ -820,22 +929,26 @@ page_start() {
 		<script>try{var t=localStorage.getItem('altf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 		</head><body>
 		<a class="skip" href="#main">Skip to content</a>
-		<header class="topbar"><div class="topbar-in">
-		<a class="brand" href="/cgi-bin/home.cgi">Alt-F</a>
-		<button type="button" class="navtoggle" id="navtoggle" aria-expanded="false" aria-controls="nav">Menu</button>
-		<nav class="nav" id="nav" aria-label="Main">
 	EOF
-	for _i in "home|Home|home.cgi" "files|Files|files.cgi" "shares|Shared folders|shares.cgi" \
-			"status|Health|status.cgi" "advanced|Advanced|advanced.cgi"; do
-		_k=${_i%%|*}; _r=${_i#*|}; _l=${_r%%|*}; _u=${_r#*|}
-		if test "$_k" = "$_sec"; then _cur=' aria-current="page"'; else _cur=""; fi
-		echo "<a href=\"/cgi-bin/$_u\"$_cur>$_l</a>"
-	done
-	cat<<-EOF
-		<form method="post" action="/cgi-bin/logout.cgi"><button type="submit">Sign out</button></form>
-		</nav></div></header>
-		<main id="main">
-	EOF
+	if test "$_sec" != login; then
+		cat<<-EOF
+			<header class="topbar"><div class="topbar-in">
+			<a class="brand" href="/cgi-bin/home.cgi">Alt-F</a>
+			<button type="button" class="navtoggle" id="navtoggle" aria-expanded="false" aria-controls="nav">Menu</button>
+			<nav class="nav" id="nav" aria-label="Main">
+		EOF
+		for _i in "home|Home|home.cgi" "files|Files|files.cgi" "shares|Shared folders|shares.cgi" \
+				"status|Health|status.cgi" "advanced|Advanced|advanced.cgi"; do
+			_k=${_i%%|*}; _r=${_i#*|}; _l=${_r%%|*}; _u=${_r#*|}
+			if test "$_k" = "$_sec"; then _cur=' aria-current="page"'; else _cur=""; fi
+			echo "<a href=\"/cgi-bin/$_u\"$_cur>$_l</a>"
+		done
+		cat<<-EOF
+			<form method="post" action="/cgi-bin/logout.cgi"><button type="submit">Sign out</button></form>
+			</nav></div></header>
+		EOF
+	fi
+	echo '<main id="main">'
 	if test -n "$firstmsg"; then echo "<div class=\"banner warn\">$firstmsg</div>"; fi
 	case "$_sec" in home|advanced)
 		if ! loadsave_settings -st >/dev/null 2>&1; then
