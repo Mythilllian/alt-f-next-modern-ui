@@ -76,6 +76,7 @@
     Array.prototype.forEach.call(els, function (el) {
       var x = new XMLHttpRequest();
       x.open('GET', el.getAttribute('data-refresh'));
+      x.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
       x.onload = function () {
         if (x.status === 200) el.innerHTML = x.responseText;
         else if (x.status === 401) window.location.reload();

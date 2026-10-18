@@ -283,6 +283,10 @@ dl.facts dd { margin: 0; }
 
 .stats { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
 
+/* ---- live sections (status page) ---- */
+.live { margin-bottom: var(--sp-4); }
+.live:empty { display: none; }
+
 /* ---- tables ---- */
 .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { border-collapse: collapse; width: 100%; }
