@@ -761,3 +761,174 @@ cat<<-EOF
 	</script>
 EOF
 }
+
+# ------------------------------------------------------------------
+# Shared page shell for the new web UI (alt-f.css / alt-f.js).
+# Old pages keep using write_header; new pages call page_start/page_end.
+# ------------------------------------------------------------------
+
+# esc <text>: print text safe for HTML body and attribute values.
+# Only forks sed when the text really contains a special character.
+esc() {
+	case "$1" in
+		*[\&\<\>\"\']*)
+			printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
+				-e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&#39;/g" ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
+
+# hsize <bytes>: human readable size
+hsize() {
+	awk -v b="${1:-0}" 'BEGIN {
+		split("B KB MB GB TB PB", u, " "); i = 1
+		while (b >= 1024 && i < 6) { b /= 1024; i++ }
+		if (i == 1) printf "%d %s", b, u[i]; else printf "%.1f %s", b, u[i]
+	}'
+}
+
+# ui_meter <percent> <label> [warn-at] [bad-at]: usage bar, colored by level
+ui_meter() {
+	_p=${1:-0}
+	case "$_p" in ''|*[!0-9]*) _p=0 ;; esac
+	if test "$_p" -gt 100; then _p=100; fi
+	_c=""
+	if test "$_p" -ge "${4:-90}"; then _c=" bad"
+	elif test "$_p" -ge "${3:-80}"; then _c=" warn"; fi
+	printf '<div class="meter%s" role="img" aria-label="%s"><i class="w%d"></i><span>%s</span></div>\n' \
+		"$_c" "$(esc "$2")" "$_p" "$(esc "$2")"
+}
+
+# page_start <title> [section]: HTTP header, <head>, top bar and navigation.
+# section is one of home files shares status advanced; it marks the current link.
+page_start() {
+	HTML_HEADER_DONE="yes"
+	firstboot
+	_sec="$2"
+	if test -s "$CONF_MISC"; then . "$CONF_MISC"; fi
+
+	printf 'Content-Type: text/html; charset=UTF-8\r\nCache-Control: no-store\r\n\r\n'
+	cat<<-EOF
+		<!DOCTYPE html>
+		<html lang="en"><head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="color-scheme" content="light dark">
+		<title>$(esc "$1") - Alt-F</title>
+		<link rel="icon" type="image/png" href="/dns-323.png">
+		<link rel="stylesheet" href="/alt-f.css">
+		<script>try{var t=localStorage.getItem('altf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+		</head><body>
+		<a class="skip" href="#main">Skip to content</a>
+		<header class="topbar"><div class="topbar-in">
+		<a class="brand" href="/cgi-bin/home.cgi">Alt-F</a>
+		<button type="button" class="navtoggle" id="navtoggle" aria-expanded="false" aria-controls="nav">Menu</button>
+		<nav class="nav" id="nav" aria-label="Main">
+	EOF
+	for _i in "home|Home|home.cgi" "files|Files|files.cgi" "shares|Shared folders|shares.cgi" \
+			"status|Health|status.cgi" "advanced|Advanced|advanced.cgi"; do
+		_k=${_i%%|*}; _r=${_i#*|}; _l=${_r%%|*}; _u=${_r#*|}
+		if test "$_k" = "$_sec"; then _cur=' aria-current="page"'; else _cur=""; fi
+		echo "<a href=\"/cgi-bin/$_u\"$_cur>$_l</a>"
+	done
+	cat<<-EOF
+		<form method="post" action="/cgi-bin/logout.cgi"><button type="submit">Sign out</button></form>
+		</nav></div></header>
+		<main id="main">
+	EOF
+	if test -n "$firstmsg"; then echo "<div class=\"banner warn\">$firstmsg</div>"; fi
+	case "$_sec" in home|advanced)
+		if ! loadsave_settings -st >/dev/null 2>&1; then
+			echo '<div class="banner warn">You have changed some settings that are not saved yet. They will be lost when the NAS restarts. <a href="/cgi-bin/settings.cgi">Save them now</a>.</div>'
+		fi ;;
+	esac
+}
+
+# page_end: footer, theme switch and script
+page_end() {
+	_ver=""
+	read -r _ver < /etc/Alt-F 2>/dev/null
+	cat<<-EOF
+		</main>
+		<footer class="foot">
+		<span>Alt-F $(esc "$_ver")</span>
+		<a href="/classic.html">Classic Alt-F pages</a>
+		<label class="theme" for="theme-select"><span>Appearance</span>
+		<select id="theme-select"><option value="auto">Automatic</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+		</footer>
+		<script src="/alt-f.js"></script>
+		</body></html>
+	EOF
+}
+
+# page_error <plain-language message> [technical detail]: friendly error page.
+# The technical detail is kept in a collapsed box for the administrator.
+page_error() {
+	page_start "Something went wrong" "${3:-}"
+	echo "<div class=\"card\"><h1>Something went wrong</h1><p>$(esc "$1")</p>"
+	if test -n "$2"; then
+		echo "<details><summary>Technical details</summary><pre>$(esc "$2")</pre></details>"
+	fi
+	echo '<div class="actions"><a class="btn primary" href="/cgi-bin/home.cgi">Back to Home</a></div></div>'
+	page_end
+	exit 0
+}
+
+# storage_info: sets ST_TOTAL and ST_USED (KB), ST_PCT (overall) and ST_MAXPCT (fullest disk)
+storage_info() {
+	eval $(df -k 2>/dev/null | awk '$1 ~ /^\/dev\/(sd|md|dm-)/ && !seen[$1]++ {
+			t += $2; u += $3; p = $5 + 0; if (p > m) m = p }
+		END { printf "ST_TOTAL=%.0f; ST_USED=%.0f; ST_MAXPCT=%d; ST_PCT=%d",
+			t, u, m, (t ? u * 100 / t : 0) }')
+	ST_TOTAL=${ST_TOTAL:-0}; ST_USED=${ST_USED:-0}; ST_PCT=${ST_PCT:-0}; ST_MAXPCT=${ST_MAXPCT:-0}
+}
+
+# health_check: cheap checks from /proc and /sys only (does not wake sleeping disks).
+# Sets HEALTH_LEVEL (ok, warn or bad) and HEALTH_MSGS (one plain sentence per line).
+health_check() {
+	HEALTH_LEVEL=ok; HEALTH_MSGS=""
+	_hc_add() {
+		HEALTH_MSGS="${HEALTH_MSGS}${HEALTH_MSGS:+
+}$2"
+		if test "$1" = bad -o "$HEALTH_LEVEL" = ok; then HEALTH_LEVEL=$1; fi
+	}
+
+	_nd=0
+	for _d in /dev/sd?; do if test -b "$_d"; then _nd=$((_nd + 1)); fi; done
+	if test "$_nd" -eq 0; then
+		_hc_add warn "No disks found. Plug in a drive and refresh."
+	else
+		storage_info
+		if test "$ST_MAXPCT" -ge 95; then
+			_hc_add bad "A disk is almost full. Delete files you no longer need, or add a bigger disk."
+		elif test "$ST_MAXPCT" -ge 85; then
+			_hc_add warn "A disk is getting full ($ST_MAXPCT% used)."
+		fi
+		if awk '$1 ~ /^\/dev\/(sd|md|dm-)/ { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == "ro") f = 1 }
+				END { exit !f }' /proc/mounts; then
+			_hc_add bad "A disk can only be read right now, not written to. It may need a check. Ask whoever looks after the NAS."
+		fi
+	fi
+
+	for _m in /sys/block/md[0-9]*/md/degraded; do
+		if test -f "$_m"; then
+			read -r _dg < "$_m"
+			if test "${_dg:-0}" != 0; then
+				_hc_add bad "One disk in your mirrored pair has a problem. Your files are still there, but they are no longer duplicated."
+			fi
+		fi
+	done
+
+	if test -r /tmp/sys/temp1_input; then
+		read -r _tmp < /tmp/sys/temp1_input
+		_crit=54
+		if test -f /etc/sysctrl.conf; then . /etc/sysctrl.conf; _crit=${crit_temp:-54}; fi
+		if test $((${_tmp:-0} / 1000)) -ge "$_crit"; then
+			_hc_add bad "The NAS is running hot. Make sure the vents are not blocked."
+		fi
+	fi
+
+	if test -s /var/log/systemerror.log; then
+		_hc_add warn "The NAS has recorded a warning. Open Health for details."
+	fi
+}
