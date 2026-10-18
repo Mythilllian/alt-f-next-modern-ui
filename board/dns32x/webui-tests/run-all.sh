@@ -25,7 +25,7 @@ if [ -n "$SHELLCHECK" ]; then
 		files_get.cgi files_put.cgi login.cgi logout.cgi fs_common.sh ) || rc=1
 fi
 
-for t in test-auth test-files test-upload; do
+for t in test-auth test-files test-upload test-install; do
 	echo "== $t"
 	sh "$HERE/$t.sh" || rc=1
 done

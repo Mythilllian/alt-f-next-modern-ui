@@ -64,27 +64,19 @@ Note on `SESSION_BIND_IP`: when you use the https port, stunnel starts httpd dir
 
 ## Install on a running 320L (try it without flashing)
 
-The root filesystem is a read-only image with a RAM layer on top (aufs). Files you copy are used immediately and **disappear on reboot**, which makes this a safe way to try the interface.
-
-From the repository root on your PC (use your NAS name or address; SSH works as before):
+From the repository root on your PC:
 
 ```sh
-cd board/dns32x/customroot
-tar cf - \
-  usr/www/alt-f.css usr/www/alt-f.js usr/www/files.js usr/www/index.html \
-  usr/www/cgi-bin/common.sh usr/www/cgi-bin/fs_common.sh \
-  usr/www/cgi-bin/login.cgi usr/www/cgi-bin/login_proc.cgi usr/www/cgi-bin/logout.cgi \
-  usr/www/cgi-bin/status.cgi usr/www/cgi-bin/sys_utils_proc.cgi \
-  usr/www/cgi-bin/home.cgi usr/www/cgi-bin/shares.cgi usr/www/cgi-bin/advanced.cgi \
-  usr/www/cgi-bin/confirm.cgi usr/www/cgi-bin/classic.cgi \
-  usr/www/cgi-bin/files.cgi usr/www/cgi-bin/files_list.cgi usr/www/cgi-bin/files_get.cgi usr/www/cgi-bin/files_put.cgi \
-  etc/web-session.conf | ssh root@NAS 'tar xf - -C /'
-ssh root@NAS 'grep -q web-session /etc/settings || echo /etc/web-session.conf >> /etc/settings'
+sh board/dns32x/webui-install.sh nas-name-or-address
 ```
 
-Then open `http://NAS/` in a browser. The old password still works.
+Use `--status` to look first, `--remove` to put the original files back, and `--yes` to skip the question. It needs `ssh` and `tar` on your PC. SSH keys save typing the password a few times.
 
-**Roll back:** reboot the NAS (Advanced > Restart the NAS, or `ssh root@NAS reboot`). Everything you copied is gone and the original pages are back. Do not delete the copied files by hand: on aufs a delete hides the original underneath too. If you saved settings while testing, `/etc/web-session.conf` is also in the saved settings; that is harmless.
+The script reads `board/dns32x/webui-files.txt` for the list of files (keep it in step if you add one). Before the first install it saves the files it replaces in `/usr/share/webui-backup` on the box, and `--remove` restores them. Running it again updates the files and keeps a `web-session.conf` you have edited.
+
+**Does it survive a reboot?** That depends on the box, and the script says which before it changes anything:
+- Alt-F runs from a read-only image with a RAM layer on top, so a plain copy is gone after a reboot. Rebooting is a safe way back.
+- If the box has an `Alt-F` folder on a disk that is in use, that folder is part of the root, so the copy is kept. Use `--remove` to go back. Do not delete the files by hand: on aufs a delete hides the original underneath too.
 
 ## Make it permanent (rebuild the firmware)
 
@@ -111,9 +103,10 @@ What is checked:
 
 - Syntax of every script (host `sh -n`, BusyBox `ash -n`) and `shellcheck -s sh` on the new scripts.
 - `test-auth.sh` (56 checks): first-time password, wrong and right password, one-time challenge, cookie flags, return-to-page safety (open redirect, header injection, classic pages coming back inside their frames), the first-time wizard, forged and malformed cookies, two devices at once, idle and absolute timeouts, expiry cleanup, address binding, cross-site POSTs, sign out.
-- `test-files.sh` (125 checks) and `test-upload.sh` (86 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
+- `test-install.sh` (12 checks): `webui-install.sh` against a fake box in a user namespace: copy, executable bits, a second run keeping edited settings, `--remove` restoring the originals, bad host names refused. It skips itself where user namespaces are unavailable.
+- `test-files.sh` (133 checks) and `test-upload.sh` (86 checks: access and CSRF, exact names, no overwriting, nested folders, refused names and symlink paths, disk space, a 200 MB binary, an interrupted upload, the multipart form): `../`, `%2e%2e`, double encoding, NUL, newline and control characters, `//`, look-alike folders such as `/mntx`, symlinks that leave `/mnt`, symlinks that stay inside, 401 without a session, exact bytes and `Content-Length` for downloads, names with spaces, quotes, `&`, `<>`, `;`, accents and emoji, `Content-Disposition` encoding, HTML never shown inline, truncation of huge folders, escaping in the no-JavaScript page.
 
-Last run: 56, 125 and 86 checks, all passed, on BusyBox 1.31.1 built from the repo configuration and on BusyBox 1.20.2. Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
+Last run: 56, 133, 86 and 12 checks, all passed, on BusyBox 1.31.1 built from the repo configuration (the first three also on BusyBox 1.20.2 before the latest changes). Headless Chromium rendered Login, Home, Files, Health, Shared folders and Advanced at 320, 768, 1280 and 2560 px in light and dark: no horizontal scrolling and no console errors.
 
 What was **not** tested: a real ARM box, real disks, HTTPS through stunnel, and a full Buildroot build.
 
