@@ -5,15 +5,7 @@
 FS_ROOT=/mnt
 FS_LIMIT=1000
 
-# fs_param <name>: print the still percent-encoded value of a query-string field.
-# Reads only the one field asked for, so nothing a visitor sends is ever evaluated.
-fs_param() {
-	_oifs=$IFS; IFS='&'; set -f
-	for _kv in $QUERY_STRING; do
-		case "$_kv" in "$1="*) printf '%s' "${_kv#*=}"; break ;; esac
-	done
-	IFS=$_oifs; set +f
-}
+fs_param() { qparam "$1"; }
 
 # fs_resolve <percent-encoded path>: on success sets FS_REAL to the canonical path.
 # On failure returns 1 and sets FS_ERR to bad, outside or missing.

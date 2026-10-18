@@ -21,7 +21,7 @@ setup() {
 	cp -r "$WWW_SRC" "$SANDBOX/www"
 	# applets the scripts expect
 	for a in sh ash httpd hexdump md5sum dd cut sed awk tr date realpath readlink ls head tail \
-			cat sort expr touch rm mkdir chmod logger sleep grep wc basename dirname find; do
+			cat sort expr touch rm mkdir chmod logger sleep grep wc basename dirname find hostname df pidof mktemp tr; do
 		ln -sf "$BB" "$SANDBOX/bin/$a"
 	done
 	# run every script with the sandbox shell and redirect the absolute paths the
@@ -32,9 +32,13 @@ setup() {
 			-e "s|/etc/web-session.conf|$SANDBOX/etc/web-session.conf|g" \
 			-e "s|/tmp/sessions|$SANDBOX/tmp/sessions|g" \
 			-e "s|/etc/Alt-F|$SANDBOX/etc/Alt-F|g" \
+			-e "s|/etc/samba/smb.conf|$SANDBOX/etc/smb.conf|g" \
+			-e "s|/etc/inetd.conf|$SANDBOX/etc/inetd.conf|g" \
 			-e "s|/mnt|$SANDBOX/mnt|g" "$f"
 	done
 	cp "$HERE/../customroot/etc/web-session.conf" "$SANDBOX/etc/"
+	cp "$HERE/../customroot/etc/samba/smb.conf" "$SANDBOX/etc/smb.conf"
+	cp "$HERE/../customroot/etc/inetd.conf" "$SANDBOX/etc/inetd.conf"
 	echo "test" > "$SANDBOX/etc/Alt-F"
 	for c in loadsave_settings smartctl plabel tune2fs blkid smbstatus showmount; do
 		printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/stubs/$c"; chmod +x "$SANDBOX/stubs/$c"

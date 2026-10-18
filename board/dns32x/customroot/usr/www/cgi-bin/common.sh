@@ -925,6 +925,7 @@ page_start() {
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<meta name="color-scheme" content="light dark">
 		<title>$(esc "$1") - Alt-F</title>
+		<base target="_top">
 		<link rel="icon" type="image/png" href="/dns-323.png">
 		<link rel="stylesheet" href="/alt-f.css">
 		<script>try{var t=localStorage.getItem('altf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
@@ -951,7 +952,7 @@ page_start() {
 	fi
 	echo '<main id="main">'
 	if test -n "$firstmsg"; then echo "<div class=\"banner warn\">$firstmsg</div>"; fi
-	case "$_sec" in home|advanced)
+	case "$_sec" in advanced)
 		if ! loadsave_settings -st >/dev/null 2>&1; then
 			echo '<div class="banner warn">You have changed some settings that are not saved yet. They will be lost when the NAS restarts. <a href="/cgi-bin/settings.cgi">Save them now</a>.</div>'
 		fi ;;
@@ -966,7 +967,7 @@ page_end() {
 		</main>
 		<footer class="foot">
 		<span>Alt-F $(esc "$_ver")</span>
-		<a href="/classic.html">Classic Alt-F pages</a>
+		<a href="/cgi-bin/classic.cgi">Classic Alt-F pages</a>
 		<label class="theme" for="theme-select"><span>Appearance</span>
 		<select id="theme-select"><option value="auto">Automatic</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
 		</footer>
@@ -1001,6 +1002,7 @@ storage_info() {
 # Sets HEALTH_LEVEL (ok, warn or bad) and HEALTH_MSGS (one plain sentence per line).
 health_check() {
 	HEALTH_LEVEL=ok; HEALTH_MSGS=""
+	ST_TOTAL=0; ST_USED=0; ST_PCT=0; ST_MAXPCT=0
 	_hc_add() {
 		HEALTH_MSGS="${HEALTH_MSGS}${HEALTH_MSGS:+
 }$2"
@@ -1045,4 +1047,49 @@ health_check() {
 	if test -s /var/log/systemerror.log; then
 		_hc_add warn "The NAS has recorded a warning. Open Health for details."
 	fi
+}
+
+# qparam <name>: print the still percent-encoded value of one query-string field.
+# Reads only the field asked for, so nothing a visitor sends is ever evaluated.
+qparam() {
+	_oifs=$IFS; IFS='&'; set -f
+	for _kv in $QUERY_STRING; do
+		case "$_kv" in "$1="*) printf '%s' "${_kv#*=}"; break ;; esac
+	done
+	IFS=$_oifs; set +f
+}
+
+# risk_of <page>: which kind of care a settings page needs (empty if none).
+# Used by the Advanced page and by confirm.cgi, so both always agree.
+risk_of() {
+	case "${1%%\?*}" in
+		diskwiz.cgi|diskpart.cgi|diskmaint.cgi|raid.cgi|lvm.cgi|cryptsetup.cgi) echo disk ;;
+		host.cgi|dnsmasq.cgi|hosts.cgi) echo network ;;
+		firmware.cgi) echo firmware ;;
+		settings.cgi) echo settings ;;
+	esac
+}
+
+# classic_url <page>: address of a classic Alt-F page shown inside the classic frames
+classic_url() {
+	echo "/cgi-bin/classic.cgi?p=/cgi-bin/$(qencode "$1")"
+}
+
+# qencode <text>: escape the few characters that would break a query-string value
+qencode() {
+	printf '%s' "$1" | sed -e 's/%/%25/g' -e 's/?/%3F/g' -e 's/&/%26/g' -e 's/=/%3D/g' -e 's/+/%2B/g' -e 's/ /%20/g'
+}
+
+# shares_tsv: "name<TAB>path" for each Samba shared folder
+shares_tsv() {
+	awk '
+	function flush() {
+		l = tolower(name)
+		if (name != "" && path != "" && l != "global" && l != "printers" && l != "homes" && l != "print$")
+			print name "\t" path
+	}
+	/^[ \t]*[#;]/ { next }
+	/^[ \t]*\[/ { flush(); name = $0; sub(/^[ \t]*\[/, "", name); sub(/\].*$/, "", name); path = ""; next }
+	/^[ \t]*path[ \t]*=/ { path = $0; sub(/^[^=]*=[ \t]*/, "", path); sub(/[ \t\r]*$/, "", path) }
+	END { flush() }' /etc/samba/smb.conf 2>/dev/null
 }
